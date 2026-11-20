@@ -45,7 +45,6 @@ const GAMES_META = [
   { id: "wordle", name: "Kelime Bulma", desc: "5 harfli Türkçe kelime yarışı", badge: "Kelime", icon: Type },
   { id: "sudoku", name: "Sudoku", desc: "4x4 mini sudoku hız yarışı", badge: "Zeka", icon: Grid },
 ];
-
 const FINAL_WORDS = [
   "KALEM", "KITAP", "DENIZ", "BULUT", "MASAL", "BAHCE", "SEHIR", "MUZIK",
   "SABAH", "ORMAN", "LIMAN", "SAHIL", "KAVUN", "BARIS", "MARTI", "DALGA",
@@ -180,14 +179,20 @@ function evaluateWordleGuess(guess, target) {
   return res;
 }
 export default function App() {
-  const [nickname, setNickname] = useState("");
-  const [enteredLobby, setEnteredLobby] = useState(false);
+  const [nickname, setNickname] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem("duello_nickname") || "";
+  });
+  const [enteredLobby, setEnteredLobby] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("duello_entered_lobby") === "1";
+  });
   const [myId] = useState(() => {
-    const existing =
-      typeof window !== "undefined" ? window.sessionStorage.getItem("duello_my_id") : null;
+    if (typeof window === "undefined") return "usr_guest";
+    const existing = window.localStorage.getItem("duello_my_id");
     if (existing) return existing;
     const created = "usr_" + Math.random().toString(36).slice(2, 9);
-    if (typeof window !== "undefined") window.sessionStorage.setItem("duello_my_id", created);
+    window.localStorage.setItem("duello_my_id", created);
     return created;
   });
 
@@ -221,8 +226,7 @@ export default function App() {
   const [matchUnread, setMatchUnread] = useState(0);
   const [floatingReaction, setFloatingReaction] = useState(null);
   const [activeMatch, setActiveMatch] = useState(null);
-
-  const [myShipGrid, setMyShipGrid] = useState(() => autoPlaceShips(6));
+    const [myShipGrid, setMyShipGrid] = useState(() => autoPlaceShips(6));
   const [myShotsOnEnemy, setMyShotsOnEnemy] = useState(() => createEmptyGrid(6));
   const [enemyGridForBot, setEnemyGridForBot] = useState(() => autoPlaceShips(6));
   const [enemyShotsOnMe, setEnemyShotsOnMe] = useState(() => createEmptyGrid(6));
@@ -263,7 +267,14 @@ export default function App() {
   const dbRef = useRef(null);
   const acceptedHandledRef = useRef(false);
   const myStatus = activeMatch ? "in_game" : "online";
-    useEffect(() => {
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("duello_nickname", nickname);
+    window.localStorage.setItem("duello_entered_lobby", enteredLobby ? "1" : "0");
+  }, [nickname, enteredLobby]);
+
+  useEffect(() => {
     if (!FIREBASE_CONFIG || !FIREBASE_CONFIG.databaseURL) return;
     try {
       const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
@@ -272,8 +283,7 @@ export default function App() {
       console.error("Firebase başlatılamadı:", err);
     }
   }, []);
-
-  useEffect(() => {
+    useEffect(() => {
     if (!enteredLobby) return;
     const cleanName = nickname.trim() || "Oyuncu";
 
@@ -362,7 +372,6 @@ export default function App() {
     return () => unsub();
   }, [activeMatch, myId, matchDrawerOpen]);
 
-  // Davet gönderen kişinin davet kabul edildiğinde maça girmesi
   useEffect(() => {
     if (!dbRef.current || !outgoingInvite || !outgoingInvite.toId) {
       acceptedHandledRef.current = false;
@@ -500,19 +509,13 @@ export default function App() {
   function acceptIncomingInvite() {
     if (!incomingInvite) return;
     const roomId = `room_${Date.now()}`;
+    const inviter = { id: incomingInvite.fromId, name: incomingInvite.fromName };
+    const gameId = incomingInvite.gameId;
     if (dbRef.current) {
       update(ref(dbRef.current, `invites/${myId}`), { status: "accepted", roomId });
     }
-    const matchObj = {
-      roomId,
-      gameType: incomingInvite.gameId,
-      isBot: false,
-      isHost: false,
-      opponent: { id: incomingInvite.fromId, name: incomingInvite.fromName },
-    };
-    resetAllGameStates(incomingInvite.gameId, false);
-    setActiveMatch(matchObj);
     setIncomingInvite(null);
+    startMatch(inviter, gameId, false, roomId);
   }
 
   function declineIncomingInvite() {
@@ -1379,7 +1382,12 @@ export default function App() {
           </div>
         </div>
         <button
-          onClick={() => setEnteredLobby(false)}
+          onClick={() => {
+            setEnteredLobby(false);
+            if (typeof window !== "undefined") {
+              window.localStorage.setItem("duello_entered_lobby", "0");
+            }
+          }}
           className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300"
         >
           Çıkış
@@ -1560,25 +1568,4 @@ export default function App() {
                       <div className={`px-3 py-1.5 rounded-2xl text-xs max-w-[82%] ${mine ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-100"}`}>
                         {m.text}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-               <form onSubmit={handleSendDirectMessage} className="flex gap-2">
-              <input
-                type="text"
-                value={dmInput}
-                onChange={(e) => setDmInput(e.target.value)}
-                placeholder={`${dmTarget.name} kişisine yaz...`}
-                className="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
-              />
-              <button type="submit" className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white">
-                <Send className="w-4 h-4" />
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-   
+          
