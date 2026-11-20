@@ -228,7 +228,16 @@ export default function App() {
   const [matchInput, setMatchInput] = useState("");
   const [matchUnread, setMatchUnread] = useState(0);
   const [floatingReaction, setFloatingReaction] = useState(null);
-  const [activeMatch, setActiveMatch] = useState(null);
+
+  const [activeMatch, setActiveMatch] = useState(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const saved = window.localStorage.getItem("duello_active_match");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
 
   const [myShipGrid, setMyShipGrid] = useState(() => autoPlaceShips(6));
   const [myShotsOnEnemy, setMyShotsOnEnemy] = useState(() => createEmptyGrid(6));
@@ -277,6 +286,15 @@ export default function App() {
     window.localStorage.setItem("duello_nickname", nickname);
     window.localStorage.setItem("duello_entered_lobby", enteredLobby ? "1" : "0");
   }, [nickname, enteredLobby]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (activeMatch) {
+      window.localStorage.setItem("duello_active_match", JSON.stringify(activeMatch));
+    } else {
+      window.localStorage.removeItem("duello_active_match");
+    }
+  }, [activeMatch]);
 
   useEffect(() => {
     if (!FIREBASE_CONFIG || !FIREBASE_CONFIG.databaseURL) return;
@@ -333,6 +351,21 @@ export default function App() {
       ]);
     }
   }, [enteredLobby, nickname, myId, myStatus, globalChatOpen]);
+
+  useEffect(() => {
+    if (!dbRef.current || !enteredLobby || !dmTarget) return;
+    const threadId = [myId, dmTarget.id].sort().join("__");
+    const dmRef = ref(dbRef.current, `chats/dm/${threadId}`);
+    const unsub = onValue(dmRef, (snap) => {
+      const val = snap.val() || {};
+      const arr = Object.values(val).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      setDmMessagesByPeer((prev) => ({
+        ...prev,
+        [dmTarget.id]: arr.slice(-60),
+      }));
+    });
+    return () => unsub();
+  }, [enteredLobby, dmTarget, myId]);
 
   useEffect(() => {
     if (!dbRef.current || !activeMatch || activeMatch.isBot) return;
@@ -536,6 +569,9 @@ export default function App() {
     }
     setActiveMatch(null);
     setMatchDrawerOpen(false);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("duello_active_match");
+    }
   }
 
   function handleSendGlobalMessage(e) {
@@ -571,14 +607,15 @@ export default function App() {
       text,
       ts: Date.now(),
     };
-    setDmMessagesByPeer((prev) => ({
-      ...prev,
-      [dmTarget.id]: [...(prev[dmTarget.id] || []), msg],
-    }));
     setDmInput("");
     if (dbRef.current) {
       const threadId = [myId, dmTarget.id].sort().join("__");
       push(ref(dbRef.current, `chats/dm/${threadId}`), msg);
+    } else {
+      setDmMessagesByPeer((prev) => ({
+        ...prev,
+        [dmTarget.id]: [...(prev[dmTarget.id] || []), msg],
+      }));
     }
   }
 
@@ -700,39 +737,41 @@ export default function App() {
 
     const nextMyScore = rpsMyScore + (outcome === "win" ? 1 : 0);
     const nextOppScore = rpsOppScore + (outcome === "lose" ? 1 : 0);
+    const currentRoundNum = rpsRound;
     setRpsMyScore(nextMyScore);
     setRpsOppScore(nextOppScore);
 
     const labelMap = { rock: "Taş", paper: "Kağıt", scissors: "Makas" };
     const msg =
       outcome === "win"
-        ? `Tur ${rpsRound}: ${labelMap[choice]} > ${labelMap[oppChoice]} — Sen kazandın!`
+        ? `Tur ${currentRoundNum}: ${labelMap[choice]} > ${labelMap[oppChoice]} — Sen kazandın!`
         : outcome === "lose"
-        ? `Tur ${rpsRound}: ${labelMap[choice]} < ${labelMap[oppChoice]} — Rakip aldı!`
-        : `Tur ${rpsRound}: İkiniz de ${labelMap[choice]} seçtiniz — Berabere!`;
+        ? `Tur ${currentRoundNum}: ${labelMap[choice]} < ${labelMap[oppChoice]} — Rakip aldı!`
+        : `Tur ${currentRoundNum}: İkiniz de ${labelMap[choice]} seçtiniz — Berabere!`;
     setRpsRoundText(msg);
 
     if (dbRef.current && activeMatch && !activeMatch.isBot) {
       update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`), {
-        round: rpsRound,
+        round: currentRoundNum,
         p1Score: activeMatch.isHost ? nextMyScore : nextOppScore,
         p2Score: activeMatch.isHost ? nextOppScore : nextMyScore,
         roundText: msg,
       });
     }
 
-    if (rpsRound >= 3 || nextMyScore === 2 || nextOppScore === 2) {
+    if (currentRoundNum >= 3 || nextMyScore === 2 || nextOppScore === 2) {
       setTimeout(() => {
         if (nextMyScore > nextOppScore) setRpsMatchWinner("me");
         else if (nextOppScore > nextMyScore) setRpsMatchWinner("opp");
         else setRpsMatchWinner("draw");
       }, 700);
     } else {
+      const upcomingRound = currentRoundNum + 1;
       setTimeout(() => {
-        setRpsRound((r) => r + 1);
+        setRpsRound(upcomingRound);
         setRpsMyPick(null);
         setRpsOppPick(null);
-        setRpsRoundText(`${rpsRound + 1}. Tur: Seçimini yap!`);
+        setRpsRoundText(`${upcomingRound}. Tur: Seçimini yap!`);
       }, 1100);
     }
   }
