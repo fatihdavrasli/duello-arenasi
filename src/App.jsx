@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { initializeApp, getApps } from "firebase/app";
 import {
   getDatabase,
@@ -62,6 +62,18 @@ const FINAL_WORDS = [
   "RADYO", "MELEK", "TARLA", "GÜNEŞ",
 ];
 
+const KEYBOARD_ROWS = [
+  ["E", "R", "T", "Y", "U", "I", "O", "P", "Ğ", "Ü"],
+  ["A", "S", "D", "F", "G", "H", "J", "K", "L", "Ş", "İ"],
+  ["GIR", "Z", "C", "V", "B", "N", "M", "Ö", "Ç", "SIL"],
+];
+
+const VALID_WORDLE_KEYS = new Set([
+  "A", "B", "C", "Ç", "D", "E", "F", "G", "Ğ", "H", "I", "İ",
+  "J", "K", "L", "M", "N", "O", "Ö", "P", "R", "S", "Ş", "T",
+  "U", "Ü", "V", "Y", "Z",
+]);
+
 const SUDOKU_PUZZLES = [
   {
     puzzle: [
@@ -95,6 +107,26 @@ const SUDOKU_PUZZLES = [
 
 const QUICK_REPLIES = ["İyi hamle! 👏", "Şanslıydın 😄", "Çok yakındı! 🔥", "Rövanş? 🔄"];
 const EMOJIS = ["👏", "😂", "🔥", "😱", "🤔", "👑"];
+
+function normalizeTrChar(ch) {
+  if (!ch) return "";
+  const upper = String(ch).toLocaleUpperCase("tr");
+  if (upper === "İ" || upper === "I") return "I";
+  if (upper === "Ş" || upper === "S") return "S";
+  if (upper === "Ğ" || upper === "G") return "G";
+  if (upper === "Ü" || upper === "U") return "U";
+  if (upper === "Ö" || upper === "O") return "O";
+  if (upper === "Ç" || upper === "C") return "C";
+  return upper;
+}
+
+function toWordleUpperChar(raw) {
+  if (!raw) return null;
+  if (raw === "i" || raw === "İ") return "İ";
+  if (raw === "I") return "I";
+  const upper = String(raw).toLocaleUpperCase("tr");
+  return VALID_WORDLE_KEYS.has(upper) ? upper : null;
+}
 
 function isWithinOneHour(ts, nowMs = Date.now()) {
   const numericTs = Number(ts || 0);
@@ -180,28 +212,35 @@ function checkTTTWinner(board) {
   return null;
 }
 
+// green: doğru harf doğru yerde | orange: harf var ama farklı yerde | red: harfte yok
 function evaluateWordleGuess(guess, target) {
-  const res = Array(5).fill("absent");
+  const res = Array(5).fill("red");
   const targetArr = Array.from(target);
   const guessArr = Array.from(guess);
-  const used = Array(5).fill(false);
+  const targetNorm = targetArr.map(normalizeTrChar);
+  const guessNorm = guessArr.map(normalizeTrChar);
+  const remainingTargetCounts = {};
 
   for (let i = 0; i < 5; i++) {
-    if (guessArr[i] === targetArr[i]) {
-      res[i] = "correct";
-      used[i] = true;
+    if (guessNorm[i] === targetNorm[i]) {
+      res[i] = "green";
+    } else {
+      const k = targetNorm[i];
+      remainingTargetCounts[k] = (remainingTargetCounts[k] || 0) + 1;
     }
   }
+
   for (let i = 0; i < 5; i++) {
-    if (res[i] === "correct") continue;
-    for (let j = 0; j < 5; j++) {
-      if (!used[j] && guessArr[i] === targetArr[j]) {
-        res[i] = "present";
-        used[j] = true;
-        break;
-      }
+    if (res[i] === "green") continue;
+    const k = guessNorm[i];
+    if ((remainingTargetCounts[k] || 0) > 0) {
+      res[i] = "orange";
+      remainingTargetCounts[k] -= 1;
+    } else {
+      res[i] = "red";
     }
   }
+
   return res;
 }
 
@@ -347,7 +386,9 @@ export default function App() {
   );
   const [wordGuesses, setWordGuesses] = useState([]);
   const [currentGuess, setCurrentGuess] = useState("");
-  const [wordStatus, setWordStatus] = useState("5 harfli kelimeyi bulmak için tahmin gir!");
+  const [wordStatus, setWordStatus] = useState(
+    "5 harfli kelimeyi bul! Yeşil: doğru yer, Turuncu: farklı yer, Kırmızı: yok."
+  );
   const [wordFinished, setWordFinished] = useState(false);
   const [oppWordProgress, setOppWordProgress] = useState(0);
 
@@ -419,7 +460,6 @@ export default function App() {
     return () => clearAllGameTimers();
   }, []);
 
-  // 1 saatlik sohbet mesajlarını periyodik temizleme
   useEffect(() => {
     const pruneExpiredMessages = () => {
       const nowMs = Date.now();
@@ -898,7 +938,7 @@ export default function App() {
     setWordTarget(FINAL_WORDS[Math.floor(Math.random() * FINAL_WORDS.length)]);
     setWordGuesses([]);
     setCurrentGuess("");
-    setWordStatus("5 harfli kelimeyi bulmak için tahmin gir!");
+    setWordStatus("5 harfli kelimeyi bul! Yeşil: doğru yer, Turuncu: farklı yer, Kırmızı: yok.");
     setWordFinished(false);
     setOppWordProgress(0);
 
@@ -1430,47 +1470,81 @@ export default function App() {
     }, 450);
   }
 
-  function handleWordKey(key) {
-    if (wordFinished) return;
-    if (key === "SIL") {
-      setCurrentGuess((g) => Array.from(g).slice(0, -1).join(""));
-      return;
-    }
-    if (key === "GIR") {
-      const chars = Array.from(currentGuess);
-      if (chars.length !== 5) {
-        setWordStatus("Lütfen 5 harf gir.");
+  const handleWordKey = useCallback(
+    (key) => {
+      if (wordFinished) return;
+      if (key === "SIL") {
+        setCurrentGuess((g) => Array.from(g).slice(0, -1).join(""));
         return;
       }
-      const normalizedGuess = chars.join("");
-      const evalRow = evaluateWordleGuess(normalizedGuess, wordTarget);
-      const nextGuesses = [...wordGuesses, { word: normalizedGuess, eval: evalRow }];
-      setWordGuesses(nextGuesses);
-      setCurrentGuess("");
+      if (key === "GIR") {
+        const chars = Array.from(currentGuess);
+        if (chars.length !== 5) {
+          setWordStatus("Lütfen 5 harf girin.");
+          return;
+        }
+        const normalizedGuess = chars.join("");
+        const evalRow = evaluateWordleGuess(normalizedGuess, wordTarget);
+        const nextGuesses = [...wordGuesses, { word: normalizedGuess, eval: evalRow }];
+        setWordGuesses(nextGuesses);
+        setCurrentGuess("");
 
-      if (activeMatch?.isBot) {
-        if (botWordTimerRef.current) clearTimeout(botWordTimerRef.current);
-        botWordTimerRef.current = setTimeout(() => {
-          setOppWordProgress((p) => Math.min(100, p + 25));
-        }, 500);
+        if (activeMatch?.isBot) {
+          if (botWordTimerRef.current) clearTimeout(botWordTimerRef.current);
+          botWordTimerRef.current = setTimeout(() => {
+            setOppWordProgress((p) => Math.min(100, p + 25));
+          }, 500);
+        }
+
+        if (normalizeTrChar(normalizedGuess) === normalizeTrChar(wordTarget)) {
+          setWordStatus(`Tebrikler! "${wordTarget}" kelimesini buldun! (+1 Puan)`);
+          setWordFinished(true);
+          awardWinPoint(`${activeMatch?.roomId}_wordle_${wordTarget}`);
+        } else if (nextGuesses.length >= 6) {
+          setWordStatus(`6 deneme hakkın doldu. Aranan kelime: ${wordTarget}`);
+          setWordFinished(true);
+        } else {
+          const greenCount = evalRow.filter((s) => s === "green").length;
+          const orangeCount = evalRow.filter((s) => s === "orange").length;
+          setWordStatus(
+            `${nextGuesses.length}/6 deneme: ${greenCount} yeşil, ${orangeCount} turuncu ipucu bulundu. Alt satırdan devam et!`
+          );
+        }
+        return;
       }
 
-      if (normalizedGuess === wordTarget) {
-        setWordStatus(`Harika! "${wordTarget}" kelimesini buldun!`);
-        setWordFinished(true);
-        awardWinPoint(`${activeMatch?.roomId}_wordle_${wordTarget}`);
-      } else if (nextGuesses.length >= 6) {
-        setWordStatus(`Hakların bitti! Doğru kelime: ${wordTarget}`);
-        setWordFinished(true);
+      const mappedLetter = toWordleUpperChar(key);
+      if (!mappedLetter) return;
+      if (Array.from(currentGuess).length < 5) {
+        setCurrentGuess((g) => g + mappedLetter);
+      }
+    },
+    [wordFinished, currentGuess, wordTarget, wordGuesses, activeMatch]
+  );
+
+  useEffect(() => {
+    if (!activeMatch || activeMatch.gameType !== "wordle" || wordFinished) return;
+    const onPhysicalKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const tag = e.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleWordKey("GIR");
+      } else if (e.key === "Backspace") {
+        e.preventDefault();
+        handleWordKey("SIL");
       } else {
-        setWordStatus(`${6 - nextGuesses.length} tahmin hakkın kaldı.`);
+        const mapped = toWordleUpperChar(e.key);
+        if (mapped) {
+          e.preventDefault();
+          handleWordKey(mapped);
+        }
       }
-      return;
-    }
-    if (Array.from(currentGuess).length < 5) {
-      setCurrentGuess((g) => g + key);
-    }
-  }
+    };
+    window.addEventListener("keydown", onPhysicalKeyDown);
+    return () => window.removeEventListener("keydown", onPhysicalKeyDown);
+  }, [activeMatch, wordFinished, handleWordKey]);
 
   function handleSudokuNumber(num) {
     if (sudokuWinner) return;
@@ -1508,9 +1582,46 @@ export default function App() {
     }
   }
 
+  const wordLetterClues = useMemo(() => {
+    const greenSet = new Set();
+    const orangeSet = new Set();
+    const redSet = new Set();
+
+    for (const g of wordGuesses) {
+      const letters = Array.from(g.word);
+      letters.forEach((ch, idx) => {
+        const norm = normalizeTrChar(ch);
+        const st = g.eval[idx];
+        if (st === "green") {
+          greenSet.add(ch);
+          orangeSet.delete(ch);
+          redSet.delete(ch);
+        } else if (st === "orange") {
+          if (!greenSet.has(ch) && !Array.from(greenSet).some((x) => normalizeTrChar(x) === norm)) {
+            orangeSet.add(ch);
+          }
+          redSet.delete(ch);
+        } else if (st === "red") {
+          const isGreenOrOrangeElsewhere =
+            Array.from(greenSet).some((x) => normalizeTrChar(x) === norm) ||
+            Array.from(orangeSet).some((x) => normalizeTrChar(x) === norm);
+          if (!isGreenOrOrangeElsewhere) {
+            redSet.add(ch);
+          }
+        }
+      });
+    }
+
+    return {
+      green: Array.from(greenSet),
+      orange: Array.from(orangeSet),
+      red: Array.from(redSet),
+    };
+  }, [wordGuesses]);
+
   const wordLetterStatuses = useMemo(() => {
     const map = {};
-    const priority = { absent: 1, present: 2, correct: 3 };
+    const priority = { red: 1, orange: 2, green: 3 };
     for (const g of wordGuesses) {
       const letters = Array.from(g.word);
       letters.forEach((ch, i) => {
@@ -1960,6 +2071,56 @@ export default function App() {
             <div className="space-y-3">
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2">
                 <p className="text-xs font-medium text-slate-200 text-center">{wordStatus}</p>
+
+                <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] pt-0.5">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-600/25 border border-emerald-500/50 text-emerald-300 font-semibold">
+                    Yeşil: Doğru yer
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-amber-500/25 border border-amber-400/60 text-amber-300 font-semibold">
+                    Turuncu: Farklı yer
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-rose-600/25 border border-rose-500/50 text-rose-300 font-semibold">
+                    Kırmızı: Yok
+                  </span>
+                </div>
+
+                {(wordLetterClues.green.length > 0 ||
+                  wordLetterClues.orange.length > 0 ||
+                  wordLetterClues.red.length > 0) && (
+                  <div className="bg-slate-950/75 border border-slate-800 rounded-xl p-2 text-[11px] space-y-1">
+                    {wordLetterClues.green.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-emerald-400 font-bold">Doğru Yer:</span>
+                        {wordLetterClues.green.map((ch) => (
+                          <span key={`g-${ch}`} className="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-extrabold">
+                            {ch}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {wordLetterClues.orange.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-amber-400 font-bold">Yerini Değiştir:</span>
+                        {wordLetterClues.orange.map((ch) => (
+                          <span key={`o-${ch}`} className="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 font-extrabold">
+                            {ch}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {wordLetterClues.red.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-rose-400 font-bold">Kelimede Yok:</span>
+                        {wordLetterClues.red.map((ch) => (
+                          <span key={`r-${ch}`} className="px-1.5 py-0.5 rounded bg-rose-700/80 text-rose-100 font-bold">
+                            {ch}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {activeMatch.isBot && (
                   <div className="space-y-1">
                     <div className="flex justify-between text-[11px] text-slate-400">
@@ -1971,6 +2132,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
+
                 {wordFinished && (
                   <div className="pt-1 text-center">
                     <button
@@ -1999,17 +2161,19 @@ export default function App() {
                           : "";
                         const status = guessObj ? guessObj.eval[colIdx] : null;
                         const colorClass =
-                          status === "correct"
-                            ? "bg-emerald-600 border-emerald-500 text-white"
-                            : status === "present"
-                            ? "bg-amber-500 border-amber-400 text-slate-950"
-                            : status === "absent"
-                            ? "bg-slate-800 border-slate-700 text-slate-400"
+                          status === "green"
+                            ? "bg-emerald-600 border-emerald-400 text-white"
+                            : status === "orange"
+                            ? "bg-amber-500 border-amber-300 text-slate-950"
+                            : status === "red"
+                            ? "bg-rose-700/85 border-rose-500/70 text-rose-100"
+                            : isCurrentRow && letter
+                            ? "bg-slate-800 border-indigo-400 text-white"
                             : "bg-slate-900 border-slate-700 text-white";
                         return (
                           <div
                             key={colIdx}
-                            className={`aspect-square rounded-xl border font-extrabold text-xl flex items-center justify-center ${colorClass}`}
+                            className={`aspect-square rounded-xl border font-extrabold text-xl flex items-center justify-center transition ${colorClass}`}
                           >
                             {letter}
                           </div>
@@ -2021,21 +2185,17 @@ export default function App() {
               </div>
 
               <div className="space-y-1.5 pt-1">
-                {[
-                  ["E", "R", "T", "Y", "U", "I", "O", "P", "Ğ", "Ü"],
-                  ["A", "S", "D", "F", "G", "H", "J", "K", "L", "Ş", "İ"],
-                  ["GIR", "Z", "C", "V", "B", "N", "M", "Ö", "Ç", "SIL"],
-                ].map((kRow, rIdx) => (
+                {KEYBOARD_ROWS.map((kRow, rIdx) => (
                   <div key={rIdx} className="flex justify-center gap-1">
                     {kRow.map((k) => {
                       const keySt = wordLetterStatuses[k];
                       const keyStyle =
-                        keySt === "correct"
-                          ? "bg-emerald-600 text-white"
-                          : keySt === "present"
-                          ? "bg-amber-500 text-slate-950"
-                          : keySt === "absent"
-                          ? "bg-slate-900 text-slate-500 border border-slate-800"
+                        keySt === "green"
+                          ? "bg-emerald-600 border border-emerald-400 text-white"
+                          : keySt === "orange"
+                          ? "bg-amber-500 border border-amber-300 text-slate-950"
+                          : keySt === "red"
+                          ? "bg-rose-800/80 border border-rose-600/60 text-rose-200"
                           : "bg-slate-800 hover:bg-slate-700 text-slate-100";
                       return (
                         <button
@@ -2043,7 +2203,7 @@ export default function App() {
                           onClick={() => handleWordKey(k)}
                           className={`${
                             k === "GIR" || k === "SIL" ? "px-2.5 text-[11px]" : "w-7 text-xs"
-                          } h-9 rounded-lg ${keyStyle} font-bold active:scale-95`}
+                          } h-9 rounded-lg ${keyStyle} font-bold active:scale-95 transition`}
                         >
                           {k === "GIR" ? "GİR" : k === "SIL" ? "⌫" : k}
                         </button>
