@@ -234,9 +234,16 @@ export default function App() {
     return created;
   });
 
+  const [myWins, setMyWins] = useState(() => {
+    if (typeof window === "undefined") return 0;
+    const raw = Number(window.localStorage.getItem("duello_my_wins") || "0");
+    return Number.isFinite(raw) && raw >= 0 ? raw : 0;
+  });
+
   const [users, setUsers] = useState([]);
   const [incomingInvite, setIncomingInvite] = useState(null);
   const [outgoingInvite, setOutgoingInvite] = useState(null);
+  const [noticeBanner, setNoticeBanner] = useState(null);
   const [selectedTargetUser, setSelectedTargetUser] = useState(null);
   const [selectedGameForInvite, setSelectedGameForInvite] = useState("rps");
 
@@ -288,6 +295,8 @@ export default function App() {
   const [rpsOppScore, setRpsOppScore] = useState(0);
   const [rpsMyPick, setRpsMyPick] = useState(null);
   const [rpsOppPick, setRpsOppPick] = useState(null);
+  const [rpsLastShownMyPick, setRpsLastShownMyPick] = useState(null);
+  const [rpsLastShownOppPick, setRpsLastShownOppPick] = useState(null);
   const [rpsPhase, setRpsPhase] = useState("picking"); // "picking" | "revealing" | "finished"
   const [rpsRoundText, setRpsRoundText] = useState(`1/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
   const [rpsMatchWinner, setRpsMatchWinner] = useState(null);
@@ -319,6 +328,8 @@ export default function App() {
   const acceptedHandledRef = useRef(false);
   const rpsTimerRef = useRef(null);
   const processedLiveRoundRef = useRef(0);
+  const awardedMatchIdRef = useRef(null);
+  const leftNoticeShownRef = useRef(false);
   const myStatus = activeMatch ? "in_game" : "online";
 
   function clearRPSTimer() {
@@ -326,6 +337,25 @@ export default function App() {
       clearTimeout(rpsTimerRef.current);
       rpsTimerRef.current = null;
     }
+  }
+
+  function showNotice(title, text) {
+    setNoticeBanner({ title, text, ts: Date.now() });
+  }
+
+  function awardWinPoint(matchKey) {
+    if (!matchKey || awardedMatchIdRef.current === matchKey) return;
+    awardedMatchIdRef.current = matchKey;
+    setMyWins((prev) => {
+      const next = prev + 1;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("duello_my_wins", String(next));
+      }
+      if (dbRef.current) {
+        update(ref(dbRef.current, `users/${myId}`), { wins: next });
+      }
+      return next;
+    });
   }
 
   useEffect(() => {
@@ -363,7 +393,13 @@ export default function App() {
 
     if (dbRef.current) {
       const userRef = ref(dbRef.current, `users/${myId}`);
-      set(userRef, { id: myId, name: cleanName, status: myStatus, updatedAt: Date.now() });
+      set(userRef, {
+        id: myId,
+        name: cleanName,
+        status: myStatus,
+        wins: myWins,
+        updatedAt: Date.now(),
+      });
       onDisconnect(userRef).remove();
 
       const unsubUsers = onValue(ref(dbRef.current, "users"), (snap) => {
@@ -396,12 +432,12 @@ export default function App() {
       };
     } else {
       setUsers([
-        { id: "demo_alice", name: "Zeynep", status: "online" },
-        { id: "demo_mert", name: "Mert", status: "online" },
-        { id: "demo_eda", name: "Eda", status: "in_game" },
+        { id: "demo_alice", name: "Zeynep", status: "online", wins: 4 },
+        { id: "demo_mert", name: "Mert", status: "online", wins: 2 },
+        { id: "demo_eda", name: "Eda", status: "in_game", wins: 6 },
       ]);
     }
-  }, [enteredLobby, nickname, myId, myStatus, globalChatOpen]);
+  }, [enteredLobby, nickname, myId, myStatus, myWins, globalChatOpen]);
 
   useEffect(() => {
     if (!dbRef.current || !enteredLobby || users.length === 0) return;
@@ -484,6 +520,21 @@ export default function App() {
       const data = snap.val();
       if (!data) return;
 
+      if (data.leftBy && data.leftBy !== myId && !leftNoticeShownRef.current) {
+        leftNoticeShownRef.current = true;
+        clearRPSTimer();
+        setActiveMatch(null);
+        setMatchDrawerOpen(false);
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem("duello_active_match");
+        }
+        showNotice(
+          "Rakip Oyundan Çıktı",
+          `${activeMatch.opponent.name} maçtan ayrıldı ve lobiye döndü.`
+        );
+        return;
+      }
+
       if (Array.isArray(data.chatList)) {
         setMatchMessages((prev) => {
           if (data.chatList.length > prev.length && !matchDrawerOpen) {
@@ -523,15 +574,17 @@ export default function App() {
 
           if (gs.winner) {
             setRpsPhase("finished");
+            const winnerMe =
+              (isP1 && gs.winner === "p1") || (!isP1 && gs.winner === "p2");
             setRpsMatchWinner(
-              gs.winner === "draw"
-                ? "draw"
-                : (isP1 && gs.winner === "p1") || (!isP1 && gs.winner === "p2")
-                ? "me"
-                : "opp"
+              gs.winner === "draw" ? "draw" : winnerMe ? "me" : "opp"
             );
+            if (winnerMe) {
+              awardWinPoint(`${activeMatch.roomId}_rps_final`);
+            }
             if (gs.roundText) setRpsRoundText(gs.roundText);
           } else if (
+            isP1 &&
             gs.p1Pick &&
             gs.p2Pick &&
             processedLiveRoundRef.current !== roundNum
@@ -540,34 +593,33 @@ export default function App() {
             const winSide = evaluateRPSRound(gs.p1Pick, gs.p2Pick);
             const nextP1Score = p1Score + (winSide === "p1" ? 1 : 0);
             const nextP2Score = p2Score + (winSide === "p2" ? 1 : 0);
-            const mySide = isP1 ? "p1" : "p2";
-            const roundOutcomeForMe =
-              winSide === "draw" ? "draw" : winSide === mySide ? "win" : "lose";
 
             const rText =
-              roundOutcomeForMe === "win"
-                ? `${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: ${getRPSLabel(myPickRemote)} > ${getRPSLabel(oppPickRemote)} — Sen kazandın!`
-                : roundOutcomeForMe === "lose"
-                ? `${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: ${getRPSLabel(myPickRemote)} < ${getRPSLabel(oppPickRemote)} — Rakip aldı!`
-                : `${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: İkiniz de ${getRPSLabel(myPickRemote)} seçtiniz — Berabere!`;
+              winSide === "p1"
+                ? `${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: ${getRPSLabel(gs.p1Pick)} > ${getRPSLabel(gs.p2Pick)} — Sen kazandın!`
+                : winSide === "p2"
+                ? `${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: ${getRPSLabel(gs.p1Pick)} < ${getRPSLabel(gs.p2Pick)} — Rakip aldı!`
+                : `${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: İkiniz de ${getRPSLabel(gs.p1Pick)} seçtiniz — Berabere!`;
 
             const newEntry = {
               round: roundNum,
-              result: roundOutcomeForMe,
-              label: `${getRPSEmoji(myPickRemote)} vs ${getRPSEmoji(oppPickRemote)}`,
+              resultForP1: winSide === "p1" ? "win" : winSide === "p2" ? "lose" : "draw",
+              label: `${getRPSEmoji(gs.p1Pick)} vs ${getRPSEmoji(gs.p2Pick)}`,
             };
             const nextHistory = [
               ...(Array.isArray(gs.history) ? gs.history.filter((h) => h.round !== roundNum) : []),
               newEntry,
             ].sort((a, b) => a.round - b.round);
 
-            setRpsPhase("revealing");
-            setRpsMyScore(isP1 ? nextP1Score : nextP2Score);
-            setRpsOppScore(isP1 ? nextP2Score : nextP1Score);
-            setRpsHistory(nextHistory);
-            setRpsRoundText(rText);
-
             clearRPSTimer();
+            update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`), {
+              phase: "revealing",
+              p1Score: nextP1Score,
+              p2Score: nextP2Score,
+              history: nextHistory,
+              roundText: rText,
+            });
+
             if (roundNum >= RPS_TOTAL_ROUNDS) {
               const finalSide =
                 nextP1Score > nextP2Score
@@ -578,52 +630,49 @@ export default function App() {
               const finalText =
                 finalSide === "draw"
                   ? `${RPS_TOTAL_ROUNDS} tur sonunda skor eşit (${nextP1Score}-${nextP2Score}) — Berabere!`
-                  : finalSide === mySide
-                  ? `${RPS_TOTAL_ROUNDS} tur sonunda ${isP1 ? `${nextP1Score}-${nextP2Score}` : `${nextP2Score}-${nextP1Score}`} ile kazandın!`
-                  : `${RPS_TOTAL_ROUNDS} tur sonunda rakip kazandı!`;
+                  : finalSide === "p1"
+                  ? `${RPS_TOTAL_ROUNDS} tur sonunda ${nextP1Score}-${nextP2Score} ile kazandın!`
+                  : `${RPS_TOTAL_ROUNDS} tur sonunda ${nextP1Score}-${nextP2Score} ile rakip kazandı!`;
 
               rpsTimerRef.current = setTimeout(() => {
-                setRpsPhase("finished");
-                setRpsMatchWinner(
-                  finalSide === "draw" ? "draw" : finalSide === mySide ? "me" : "opp"
-                );
-                setRpsRoundText(finalText);
-                if (isP1 && dbRef.current) {
-                  update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`), {
-                    p1Score: nextP1Score,
-                    p2Score: nextP2Score,
-                    history: nextHistory,
-                    winner: finalSide,
-                    roundText: finalText,
-                  });
-                }
-              }, 1100);
+                update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`), {
+                  phase: "finished",
+                  p1Score: nextP1Score,
+                  p2Score: nextP2Score,
+                  history: nextHistory,
+                  winner: finalSide,
+                  roundText: finalText,
+                });
+              }, 2200);
             } else {
               const nextRoundNum = roundNum + 1;
               rpsTimerRef.current = setTimeout(() => {
-                setRpsRound(nextRoundNum);
-                setRpsMyPick(null);
-                setRpsOppPick(null);
-                setRpsPhase("picking");
-                setRpsRoundText(`${nextRoundNum}/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
-                if (isP1 && dbRef.current) {
-                  update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`), {
-                    round: nextRoundNum,
-                    p1Score: nextP1Score,
-                    p2Score: nextP2Score,
-                    p1Pick: null,
-                    p2Pick: null,
-                    history: nextHistory,
-                    roundText: `${nextRoundNum}/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`,
-                  });
-                }
-              }, 1300);
+                update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`), {
+                  phase: "picking",
+                  round: nextRoundNum,
+                  p1Score: nextP1Score,
+                  p2Score: nextP2Score,
+                  p1Pick: null,
+                  p2Pick: null,
+                  history: nextHistory,
+                  roundText: `${nextRoundNum}/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`,
+                });
+              }, 2600);
             }
-          } else if (myPickRemote && !oppPickRemote) {
-            setRpsRoundText(`${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: Seçimin alındı, rakip bekleniyor...`);
-          } else if (!myPickRemote && !oppPickRemote && gs.roundText) {
-            setRpsPhase("picking");
-            setRpsRoundText(gs.roundText);
+          } else {
+            if (myPickRemote) setRpsLastShownMyPick(myPickRemote);
+            if (oppPickRemote) setRpsLastShownOppPick(oppPickRemote);
+
+            if (gs.phase === "revealing") {
+              setRpsPhase("revealing");
+              if (gs.roundText) setRpsRoundText(gs.roundText);
+            } else if (myPickRemote && !oppPickRemote) {
+              setRpsPhase("picking");
+              setRpsRoundText(`${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: Seçimin alındı, rakip bekleniyor...`);
+            } else {
+              setRpsPhase("picking");
+              setRpsRoundText(gs.roundText || `${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
+            }
           }
         }
       }
@@ -639,7 +688,8 @@ export default function App() {
     const targetInviteRef = ref(dbRef.current, `invites/${outgoingInvite.toId}`);
     const unsub = onValue(targetInviteRef, (snap) => {
       const val = snap.val();
-      if (val && val.status === "accepted" && val.roomId && !acceptedHandledRef.current) {
+      if (!val) return;
+      if (val.status === "accepted" && val.roomId && !acceptedHandledRef.current) {
         acceptedHandledRef.current = true;
         const targetOpp = { id: outgoingInvite.toId, name: outgoingInvite.toName };
         const gId = outgoingInvite.gameId;
@@ -647,6 +697,15 @@ export default function App() {
         setOutgoingInvite(null);
         remove(targetInviteRef);
         startMatch(targetOpp, gId, false, rId, true);
+      } else if (val.status === "declined") {
+        const declName = outgoingInvite.toName;
+        const declGame = outgoingInvite.gameName;
+        setOutgoingInvite(null);
+        remove(targetInviteRef);
+        showNotice(
+          "Davet Reddedildi",
+          `${declName} ${declGame} davetini kabul etmedi.`
+        );
       }
     });
     return () => unsub();
@@ -655,6 +714,8 @@ export default function App() {
   function resetAllGameStates(gameType, isBotMatch = false, roomIdForSync = null, isHostForSync = true) {
     clearRPSTimer();
     processedLiveRoundRef.current = 0;
+    awardedMatchIdRef.current = null;
+    leftNoticeShownRef.current = false;
 
     setMyShipGrid(autoPlaceShips(6));
     setMyShotsOnEnemy(createEmptyGrid(6));
@@ -669,6 +730,8 @@ export default function App() {
     setRpsOppScore(0);
     setRpsMyPick(null);
     setRpsOppPick(null);
+    setRpsLastShownMyPick(null);
+    setRpsLastShownOppPick(null);
     setRpsPhase("picking");
     setRpsRoundText(`1/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
     setRpsMatchWinner(null);
@@ -676,6 +739,7 @@ export default function App() {
 
     if (gameType === "rps" && !isBotMatch && dbRef.current && roomIdForSync && isHostForSync) {
       update(ref(dbRef.current, `matches/${roomIdForSync}/gameState`), {
+        phase: "picking",
         round: 1,
         p1Score: 0,
         p2Score: 0,
@@ -745,6 +809,7 @@ export default function App() {
         gameType,
         players: [myId, opponent.id],
         createdAt: Date.now(),
+        leftBy: null,
         chatList: [
           {
             id: "m_" + Date.now(),
@@ -755,6 +820,7 @@ export default function App() {
           },
         ],
         gameState: {
+          phase: "picking",
           board: Array(9).fill(""),
           turn: "X",
           round: 1,
@@ -809,7 +875,9 @@ export default function App() {
 
   function declineIncomingInvite() {
     if (!incomingInvite) return;
-    if (dbRef.current) set(ref(dbRef.current, `invites/${myId}`), null);
+    if (dbRef.current) {
+      update(ref(dbRef.current, `invites/${myId}`), { status: "declined", ts: Date.now() });
+    }
     setIncomingInvite(null);
   }
 
@@ -823,6 +891,17 @@ export default function App() {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem("duello_active_match");
     }
+  }
+
+  function handleRequestNewRPSMatch() {
+    if (!activeMatch) return;
+    if (activeMatch.isBot) {
+      resetAllGameStates("rps", true, activeMatch.roomId, activeMatch.isHost);
+      return;
+    }
+    const targetOpp = activeMatch.opponent;
+    leaveMatch();
+    sendGameInvite(targetOpp, "rps");
   }
 
   function handleSendGlobalMessage(e) {
@@ -928,6 +1007,7 @@ export default function App() {
     if (totalShips > 0 && myHits >= totalShips) {
       setBsWinner("me");
       setBsStatus("Tebrikler! Düşman filosunu tamamen batırdın!");
+      awardWinPoint(`${activeMatch?.roomId}_bs_win`);
       return;
     }
 
@@ -972,6 +1052,8 @@ export default function App() {
   function handleRPSPick(choice) {
     if (rpsPhase !== "picking" || rpsMatchWinner || rpsMyPick) return;
 
+    setRpsLastShownMyPick(choice);
+
     if (activeMatch && !activeMatch.isBot && dbRef.current) {
       setRpsMyPick(choice);
       setRpsRoundText(`${rpsRound}/${RPS_TOTAL_ROUNDS}. Tur: Seçimin alındı, rakip bekleniyor...`);
@@ -988,6 +1070,7 @@ export default function App() {
 
     setRpsMyPick(choice);
     setRpsOppPick(oppChoice);
+    setRpsLastShownOppPick(oppChoice);
     setRpsPhase("revealing");
 
     const winSide = evaluateRPSRound(choice, oppChoice);
@@ -1010,7 +1093,7 @@ export default function App() {
       ...rpsHistory.filter((h) => h.round !== currentRoundNum),
       {
         round: currentRoundNum,
-        result: roundOutcome,
+        resultForP1: roundOutcome,
         label: `${getRPSEmoji(choice)} vs ${getRPSEmoji(oppChoice)}`,
       },
     ].sort((a, b) => a.round - b.round);
@@ -1022,6 +1105,9 @@ export default function App() {
           nextMyScore > nextOppScore ? "me" : nextOppScore > nextMyScore ? "opp" : "draw";
         setRpsPhase("finished");
         setRpsMatchWinner(winnerVal);
+        if (winnerVal === "me") {
+          awardWinPoint(`${activeMatch?.roomId}_bot_rps_${currentRoundNum}`);
+        }
         setRpsRoundText(
           winnerVal === "me"
             ? `${RPS_TOTAL_ROUNDS} tur sonunda ${nextMyScore}-${nextOppScore} ile kazandın!`
@@ -1029,7 +1115,7 @@ export default function App() {
             ? `${RPS_TOTAL_ROUNDS} tur sonunda ${nextMyScore}-${nextOppScore} ile rakip kazandı!`
             : `${RPS_TOTAL_ROUNDS} tur sonunda ${nextMyScore}-${nextOppScore} berabere!`
         );
-      }, 1050);
+      }, 2200);
     } else {
       const upcomingRound = currentRoundNum + 1;
       rpsTimerRef.current = setTimeout(() => {
@@ -1038,7 +1124,7 @@ export default function App() {
         setRpsOppPick(null);
         setRpsPhase("picking");
         setRpsRoundText(`${upcomingRound}/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
-      }, 1250);
+      }, 2600);
     }
   }
 
@@ -1054,6 +1140,10 @@ export default function App() {
     setTttBoard(nextBoard);
     setTttTurn(nextTurn);
     setTttResult(res);
+
+    if (res && res.winner === "X") {
+      awardWinPoint(`${activeMatch?.roomId}_ttt_${nextBoard.join("")}`);
+    }
 
     if (dbRef.current && activeMatch && !activeMatch.isBot) {
       update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`), {
@@ -1100,6 +1190,7 @@ export default function App() {
       if (currentGuess === wordTarget) {
         setWordStatus(`Harika! "${wordTarget}" kelimesini buldun!`);
         setWordFinished(true);
+        awardWinPoint(`${activeMatch?.roomId}_wordle_${wordTarget}`);
       } else if (nextGuesses.length >= 6) {
         setWordStatus(`Hakların bitti! Doğru kelime: ${wordTarget}`);
         setWordFinished(true);
@@ -1136,6 +1227,7 @@ export default function App() {
     if (allCorrect) {
       setSudokuWinner("me");
       setSudokuMessage("4x4 Sudoku'yu hatasız tamamladın! Kazandın!");
+      awardWinPoint(`${activeMatch?.roomId}_sudoku_${sudokuIndex}`);
     } else if (filledCount === 16) {
       setSudokuMessage("Bazı karelerde çakışma var, kontrol et!");
     } else {
@@ -1147,6 +1239,25 @@ export default function App() {
     if (!dmTarget) return [];
     return dmMessagesByPeer[dmTarget.id] || [];
   }, [dmTarget, dmMessagesByPeer]);
+
+  const leaderboardList = useMemo(() => {
+    const cleanName = nickname.trim() || "Oyuncu";
+    const meEntry = {
+      id: myId,
+      name: cleanName,
+      wins: myWins,
+      status: myStatus,
+      isMe: true,
+    };
+    const others = users.map((u) => ({
+      id: u.id,
+      name: u.name || "Oyuncu",
+      wins: Number(u.wins || 0),
+      status: u.status || "online",
+      isMe: false,
+    }));
+    return [meEntry, ...others].sort((a, b) => b.wins - a.wins);
+  }, [nickname, myId, myWins, myStatus, users]);
 
   if (!enteredLobby) {
     return (
@@ -1193,8 +1304,8 @@ export default function App() {
               <div>Lobi, DM & Maç İçi</div>
             </div>
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
-              <div className="font-semibold text-slate-200">Bot Modu</div>
-              <div>Tek başına test et</div>
+              <div className="font-semibold text-slate-200">Liderlik</div>
+              <div>Her galibiyet +1 puan</div>
             </div>
           </div>
         </div>
@@ -1210,6 +1321,8 @@ export default function App() {
 
   if (activeMatch) {
     const gameInfo = GAMES_META.find((g) => g.id === activeMatch.gameType) || GAMES_META[1];
+    const shownMyPick = rpsMyPick || rpsLastShownMyPick;
+    const shownOppPick = rpsOppPick || rpsLastShownOppPick;
 
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-20 relative">
@@ -1283,7 +1396,7 @@ export default function App() {
                 <p className="text-sm font-semibold text-indigo-300">{bsStatus}</p>
                 {bsWinner && (
                   <p className="mt-1 text-base font-extrabold text-emerald-400">
-                    {bsWinner === "me" ? "KAZANDIN! 🎉" : "RAKİP KAZANDI!"}
+                    {bsWinner === "me" ? "KAZANDIN! (+1 Puan) 🎉" : "RAKİP KAZANDI!"}
                   </p>
                 )}
               </div>
@@ -1365,12 +1478,22 @@ export default function App() {
                   {Array.from({ length: RPS_TOTAL_ROUNDS }).map((_, idx) => {
                     const rNum = idx + 1;
                     const item = rpsHistory.find((h) => h.round === rNum);
+                    const myOutcome = item
+                      ? activeMatch.isHost
+                        ? item.resultForP1
+                        : item.resultForP1 === "win"
+                        ? "lose"
+                        : item.resultForP1 === "lose"
+                        ? "win"
+                        : "draw"
+                      : null;
+
                     const badgeStyle =
-                      item?.result === "win"
+                      myOutcome === "win"
                         ? "bg-emerald-600/25 border-emerald-500/60 text-emerald-300"
-                        : item?.result === "lose"
+                        : myOutcome === "lose"
                         ? "bg-rose-600/25 border-rose-500/60 text-rose-300"
-                        : item?.result === "draw"
+                        : myOutcome === "draw"
                         ? "bg-amber-500/20 border-amber-400/50 text-amber-200"
                         : rNum === rpsRound && !rpsMatchWinner
                         ? "bg-indigo-600/20 border-indigo-400/60 text-indigo-200"
@@ -1392,15 +1515,35 @@ export default function App() {
                 <p className="text-center text-sm font-medium text-slate-200">{rpsRoundText}</p>
               </div>
 
-              {(rpsPhase === "revealing" || rpsPhase === "finished") && (rpsMyPick || rpsOppPick) && (
+              {(shownMyPick || shownOppPick) && (
                 <div className="grid grid-cols-2 gap-3 text-center">
-                  <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
-                    <div className="text-xs text-slate-400 mb-1">Seçimin ({getRPSLabel(rpsMyPick)})</div>
-                    <div className="text-4xl">{getRPSEmoji(rpsMyPick)}</div>
+                  <div className="bg-slate-900/90 border border-indigo-500/30 rounded-2xl p-4">
+                    <div className="text-xs text-slate-400 mb-1">
+                      Seçimin ({shownMyPick ? getRPSLabel(shownMyPick) : "Bekleniyor"})
+                    </div>
+                    <div className="text-4xl">{shownMyPick ? getRPSEmoji(shownMyPick) : "⏳"}</div>
                   </div>
-                  <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
-                    <div className="text-xs text-slate-400 mb-1">Rakip ({getRPSLabel(rpsOppPick)})</div>
-                    <div className="text-4xl">{getRPSEmoji(rpsOppPick)}</div>
+                  <div className="bg-slate-900/90 border border-rose-500/30 rounded-2xl p-4">
+                    <div className="text-xs text-slate-400 mb-1">
+                      Rakip (
+                      {rpsPhase === "revealing" || rpsPhase === "finished" || activeMatch.isBot
+                        ? shownOppPick
+                          ? getRPSLabel(shownOppPick)
+                          : "-"
+                        : rpsOppPick
+                        ? "Seçti"
+                        : "Düşünüyor"}
+                      )
+                    </div>
+                    <div className="text-4xl">
+                      {rpsPhase === "revealing" || rpsPhase === "finished" || activeMatch.isBot
+                        ? shownOppPick
+                          ? getRPSEmoji(shownOppPick)
+                          : "⏳"
+                        : rpsOppPick
+                        ? "✅"
+                        : "⏳"}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1410,23 +1553,16 @@ export default function App() {
                   <Trophy className="w-10 h-10 text-amber-400 mx-auto" />
                   <div className="text-xl font-extrabold text-white">
                     {rpsMatchWinner === "me"
-                      ? `5 Turu Kazandın! (${rpsMyScore}-${rpsOppScore})`
+                      ? `5 Turu Kazandın! (+1 Puan) (${rpsMyScore}-${rpsOppScore})`
                       : rpsMatchWinner === "opp"
                       ? `${activeMatch.opponent.name} Kazandı! (${rpsMyScore}-${rpsOppScore})`
                       : `5 Tur Berabere Bitti! (${rpsMyScore}-${rpsOppScore})`}
                   </div>
                   <button
-                    onClick={() =>
-                      resetAllGameStates(
-                        "rps",
-                        activeMatch.isBot,
-                        activeMatch.roomId,
-                        activeMatch.isHost
-                      )
-                    }
+                    onClick={handleRequestNewRPSMatch}
                     className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-sm text-white"
                   >
-                    Yeni 5 Turluk Maç
+                    {activeMatch.isBot ? "Yeni 5 Turluk Maç" : "Yeni 5 Turluk Maç (Davet Gönder)"}
                   </button>
                 </div>
               ) : (
@@ -1462,7 +1598,7 @@ export default function App() {
                     {tttResult.winner === "draw"
                       ? "Berabere!"
                       : tttResult.winner === "X"
-                      ? "X (Sen) Kazandın!"
+                      ? "X (Sen) Kazandın! (+1 Puan)"
                       : "O (Rakip) Kazandı!"}
                   </p>
                 ) : (
@@ -1734,7 +1870,9 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-base font-extrabold leading-tight text-white">Düello Arenası</h1>
-            <p className="text-xs text-emerald-400">● {nickname.trim() || "Oyuncu"} (Çevrimiçi)</p>
+            <p className="text-xs text-emerald-400">
+              ● {nickname.trim() || "Oyuncu"} • {myWins} Puan
+            </p>
           </div>
         </div>
         <button
@@ -1751,6 +1889,23 @@ export default function App() {
       </header>
 
       <main className="max-w-md mx-auto p-4 space-y-5">
+        {noticeBanner && (
+          <div className="bg-amber-950/70 border border-amber-500/50 rounded-2xl p-3.5 shadow-xl flex items-start justify-between gap-2">
+            <div className="space-y-0.5">
+              <div className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                {noticeBanner.title}
+              </div>
+              <p className="text-xs text-white">{noticeBanner.text}</p>
+            </div>
+            <button
+              onClick={() => setNoticeBanner(null)}
+              className="p-1 rounded-lg bg-slate-900/70 text-slate-300 hover:text-white shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {incomingInvite && (
           <div className="bg-indigo-950/70 border border-indigo-500/50 rounded-2xl p-4 shadow-xl space-y-3">
             <div className="flex items-center gap-2 text-indigo-300 text-xs font-bold uppercase tracking-wider">
@@ -1887,7 +2042,9 @@ export default function App() {
                     <div className="flex items-center gap-2.5 min-w-0">
                       <CircleDot className={`w-3.5 h-3.5 shrink-0 ${isBusy ? "text-amber-400" : "text-emerald-400"}`} />
                       <div className="truncate">
-                        <div className="text-sm font-semibold text-white truncate">{u.name}</div>
+                        <div className="text-sm font-semibold text-white truncate">
+                          {u.name} <span className="text-xs text-amber-300 font-bold">({Number(u.wins || 0)}p)</span>
+                        </div>
                         <div className="text-[11px] text-slate-400">{isBusy ? "Oyunda" : "Müsait"}</div>
                       </div>
                     </div>
@@ -1922,6 +2079,39 @@ export default function App() {
               })}
             </div>
           )}
+        </section>
+
+        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-amber-400" />
+              En Çok Kazananlar
+            </h2>
+            <span className="text-[11px] text-slate-400">Galibiyet = +1 Puan</span>
+          </div>
+
+          <div className="space-y-1.5">
+            {leaderboardList.slice(0, 5).map((entry, idx) => (
+              <div
+                key={entry.id}
+                className={`px-3 py-2 rounded-xl border flex items-center justify-between text-xs ${
+                  entry.isMe
+                    ? "bg-indigo-950/50 border-indigo-500/40 text-white"
+                    : "bg-slate-950/70 border-slate-800 text-slate-200"
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="w-5 h-5 rounded-full bg-slate-800 text-amber-300 font-extrabold text-[11px] flex items-center justify-center shrink-0">
+                    {idx + 1}
+                  </span>
+                  <span className="font-semibold truncate">
+                    {entry.name} {entry.isMe ? "(Sen)" : ""}
+                  </span>
+                </div>
+                <span className="font-extrabold text-amber-300 shrink-0">{entry.wins} Puan</span>
+              </div>
+            ))}
+          </div>
         </section>
 
         <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
