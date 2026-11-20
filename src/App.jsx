@@ -33,140 +33,23 @@ import {
   Bell,
 } from "lucide-react";
 
-// İstersen kendi Firebase Realtime Database config bilgilerini buraya yaz:
 const FIREBASE_CONFIG =
   typeof window !== "undefined" && window.__FIREBASE_CONFIG__
     ? window.__FIREBASE_CONFIG__
     : null;
 
 const GAMES_META = [
-  {
-    id: "battleship",
-    name: "Amiral Battı",
-    desc: "6x6 hızlı deniz savaşı",
-    badge: "Strateji",
-    icon: Ship,
-  },
-  {
-    id: "rps",
-    name: "Taş Kağıt Makas",
-    desc: "3 turluk refleks düellosu",
-    badge: "Hızlı",
-    icon: Swords,
-  },
-  {
-    id: "ttt",
-    name: "Tic Tac Toe",
-    desc: "3x3 sıra tabanlı XOX",
-    badge: "Klasik",
-    icon: Hash,
-  },
-  {
-    id: "wordle",
-    name: "Kelime Bulma",
-    desc: "5 harfli Türkçe kelime yarışı",
-    badge: "Kelime",
-    icon: Type,
-  },
-  {
-    id: "sudoku",
-    name: "Sudoku",
-    desc: "4x4 mini sudoku hız yarışı",
-    badge: "Zeka",
-    icon: Grid,
-  },
+  { id: "battleship", name: "Amiral Battı", desc: "6x6 hızlı deniz savaşı", badge: "Strateji", icon: Ship },
+  { id: "rps", name: "Taş Kağıt Makas", desc: "3 turluk refleks düellosu", badge: "Hızlı", icon: Swords },
+  { id: "ttt", name: "Tic Tac Toe", desc: "3x3 sıra tabanlı XOX", badge: "Klasik", icon: Hash },
+  { id: "wordle", name: "Kelime Bulma", desc: "5 harfli Türkçe kelime yarışı", badge: "Kelime", icon: Type },
+  { id: "sudoku", name: "Sudoku", desc: "4x4 mini sudoku hız yarışı", badge: "Zeka", icon: Grid },
 ];
 
-const TURKISH_WORDS = [
-  "KALEM",
-  "KITAP",
-  "DENIZ",
-  "BULUT",
-  "MASAL",
-  "YILDIZ",
-  "BAHCE",
-  "SEHIR",
-  "MUZIK",
-  "SABAH",
-  "RÜZGAR",
-  "GÜNES",
-  "KÖPRÜ",
-  "ORMAN",
-  "LIMAN",
-  "SAHIL",
-  "KAVUN",
-  "ÇICEK",
-  "BARIS",
-  "UMUTL",
-].map((w) => w.slice(0, 5));
-
-const WORD_POOL = [
-  "KALEM",
-  "KITAP",
-  "DENIZ",
-  "BULUT",
-  "MASAL",
-  "BAHCE",
-  "SEHIR",
-  "MUZIK",
-  "SABAH",
-  "ORMAN",
-  "LIMAN",
-  "SAHIL",
-  "KAVUN",
-  "BARIS",
-  "MARTI",
-  "KÖPEK",
-  "KEDİC",
-  "DALGA",
-  "TOPRAK",
-  "KULEL",
-].map((w) => w.slice(0, 5));
-
-const CLEAN_WORDS = [
-  "KALEM",
-  "KITAP",
-  "DENIZ",
-  "BULUT",
-  "MASAL",
-  "BAHCE",
-  "SEHIR",
-  "MUZIK",
-  "SABAH",
-  "ORMAN",
-  "LIMAN",
-  "SAHIL",
-  "KAVUN",
-  "BARIS",
-  "MARTI",
-  "DALGA",
-  "YAPRAK",
-  "KAPIK",
-  "GÖZLÜ",
-  "SEVGİ",
-].map((w) => w.slice(0, 5));
-
 const FINAL_WORDS = [
-  "KALEM",
-  "KITAP",
-  "DENIZ",
-  "BULUT",
-  "MASAL",
-  "BAHCE",
-  "SEHIR",
-  "MUZIK",
-  "SABAH",
-  "ORMAN",
-  "LIMAN",
-  "SAHIL",
-  "KAVUN",
-  "BARIS",
-  "MARTI",
-  "DALGA",
-  "KAVUS",
-  "RADYO",
-  "MELEK",
-  "TARLA",
+  "KALEM", "KITAP", "DENIZ", "BULUT", "MASAL", "BAHCE", "SEHIR", "MUZIK",
+  "SABAH", "ORMAN", "LIMAN", "SAHIL", "KAVUN", "BARIS", "MARTI", "DALGA",
+  "KAVUS", "RADYO", "MELEK", "TARLA",
 ];
 
 const SUDOKU_PUZZLES = [
@@ -200,15 +83,8 @@ const SUDOKU_PUZZLES = [
   },
 ];
 
-const QUICK_REPLIES = [
-  "İyi hamle! 👏",
-  "Şanslıydın 😄",
-  "Çok yakındı! 🔥",
-  "Rövanş? 🔄",
-];
-
+const QUICK_REPLIES = ["İyi hamle! 👏", "Şanslıydın 😄", "Çok yakındı! 🔥", "Rövanş? 🔄"];
 const EMOJIS = ["👏", "😂", "🔥", "😱", "🤔", "👑"];
-
 function createEmptyGrid(size = 6) {
   return Array.from({ length: size }, () => Array(size).fill(0));
 }
@@ -256,43 +132,26 @@ function countShipCells(grid) {
 
 function getBotChatReply(text, gameType) {
   const lower = (text || "").toLowerCase();
-  if (lower.includes("rövanş") || lower.includes("tekrar")) {
-    return "Hemen bir rövanş daha atalım, hazırım! 🔥";
-  }
-  if (lower.includes("şans") || lower.includes("nasıl")) {
-    return "Tamamen hesaplanmış strateji 😄";
-  }
-  if (gameType === "battleship") {
-    return "Radarlarım açık, gemilerim sağlam! 🚢";
-  }
-  if (gameType === "wordle") {
-    return "Harfleri iyi analiz et, 5 harf seni bekliyor! 🔤";
-  }
-  if (gameType === "sudoku") {
-    return "Satır ve sütunlara dikkat, hızlanıyorum! 🧠";
-  }
+  if (lower.includes("rövanş") || lower.includes("tekrar")) return "Hemen bir rövanş daha atalım, hazırım! 🔥";
+  if (lower.includes("şans") || lower.includes("nasıl")) return "Tamamen hesaplanmış strateji 😄";
+  if (gameType === "battleship") return "Radarlarım açık, gemilerim sağlam! 🚢";
+  if (gameType === "wordle") return "Harfleri iyi analiz et, 5 harf seni bekliyor! 🔤";
+  if (gameType === "sudoku") return "Satır ve sütunlara dikkat, hızlanıyorum! 🧠";
   return "Güzel gidiyor, bakalım kim kazanacak! 👏";
 }
 
 function checkTTTWinner(board) {
   const lines = [
-    [0, 1, 2],
-    [3, 4, 5],
-    [6, 7, 8],
-    [0, 3, 6],
-    [1, 4, 7],
-    [2, 5, 8],
-    [0, 4, 8],
-    [2, 4, 6],
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6],
   ];
   for (const [a, b, c] of lines) {
     if (board[a] && board[a] === board[b] && board[a] === board[c]) {
       return { winner: board[a], line: [a, b, c] };
     }
   }
-  if (board.every((cell) => Boolean(cell))) {
-    return { winner: "draw", line: [] };
-  }
+  if (board.every((cell) => Boolean(cell))) return { winner: "draw", line: [] };
   return null;
 }
 
@@ -325,14 +184,10 @@ export default function App() {
   const [enteredLobby, setEnteredLobby] = useState(false);
   const [myId] = useState(() => {
     const existing =
-      typeof window !== "undefined"
-        ? window.sessionStorage.getItem("duello_my_id")
-        : null;
+      typeof window !== "undefined" ? window.sessionStorage.getItem("duello_my_id") : null;
     if (existing) return existing;
     const created = "usr_" + Math.random().toString(36).slice(2, 9);
-    if (typeof window !== "undefined") {
-      window.sessionStorage.setItem("duello_my_id", created);
-    }
+    if (typeof window !== "undefined") window.sessionStorage.setItem("duello_my_id", created);
     return created;
   });
 
@@ -342,7 +197,6 @@ export default function App() {
   const [selectedTargetUser, setSelectedTargetUser] = useState(null);
   const [selectedGameForInvite, setSelectedGameForInvite] = useState("rps");
 
-  // Sohbet durumları
   const [globalChatOpen, setGlobalChatOpen] = useState(true);
   const [globalMessages, setGlobalMessages] = useState([
     {
@@ -366,11 +220,8 @@ export default function App() {
   const [matchInput, setMatchInput] = useState("");
   const [matchUnread, setMatchUnread] = useState(0);
   const [floatingReaction, setFloatingReaction] = useState(null);
-
-  // Aktif maç durumu
   const [activeMatch, setActiveMatch] = useState(null);
 
-  // Oyun 1: Amiral Battı (6x6)
   const [myShipGrid, setMyShipGrid] = useState(() => autoPlaceShips(6));
   const [myShotsOnEnemy, setMyShotsOnEnemy] = useState(() => createEmptyGrid(6));
   const [enemyGridForBot, setEnemyGridForBot] = useState(() => autoPlaceShips(6));
@@ -379,7 +230,6 @@ export default function App() {
   const [bsStatus, setBsStatus] = useState("Sıra sende! Düşman denizinde bir kare seç.");
   const [bsWinner, setBsWinner] = useState(null);
 
-  // Oyun 2: Taş Kağıt Makas (3 tur)
   const [rpsRound, setRpsRound] = useState(1);
   const [rpsMyScore, setRpsMyScore] = useState(0);
   const [rpsOppScore, setRpsOppScore] = useState(0);
@@ -388,22 +238,19 @@ export default function App() {
   const [rpsRoundText, setRpsRoundText] = useState("1. Tur: Seçimini yap!");
   const [rpsMatchWinner, setRpsMatchWinner] = useState(null);
 
-  // Oyun 3: Tic Tac Toe (3x3)
   const [tttBoard, setTttBoard] = useState(Array(9).fill(""));
   const [tttTurn, setTttTurn] = useState("X");
   const [tttResult, setTttResult] = useState(null);
 
-  // Oyun 4: Kelime Bulma (5 harfli Türkçe)
-  const [wordTarget, setWordTarget] = useState(() => {
-    return FINAL_WORDS[Math.floor(Math.random() * FINAL_WORDS.length)];
-  });
+  const [wordTarget, setWordTarget] = useState(
+    () => FINAL_WORDS[Math.floor(Math.random() * FINAL_WORDS.length)]
+  );
   const [wordGuesses, setWordGuesses] = useState([]);
   const [currentGuess, setCurrentGuess] = useState("");
   const [wordStatus, setWordStatus] = useState("5 harfli kelimeyi bulmak için tahmin gir!");
   const [wordFinished, setWordFinished] = useState(false);
   const [oppWordProgress, setOppWordProgress] = useState(0);
 
-  // Oyun 5: Sudoku (4x4)
   const [sudokuIndex, setSudokuIndex] = useState(0);
   const [sudokuBoard, setSudokuBoard] = useState(() =>
     SUDOKU_PUZZLES[0].puzzle.map((r) => [...r])
@@ -414,59 +261,39 @@ export default function App() {
   const [oppSudokuProgress, setOppSudokuProgress] = useState(0);
 
   const dbRef = useRef(null);
-  const activeMatchRef = useRef(null);
-  activeMatchRef.current = activeMatch;
-
+  const acceptedHandledRef = useRef(false);
   const myStatus = activeMatch ? "in_game" : "online";
-
-  // Firebase bağlantısı (opsiyonel; yoksa yerel/bot modda çalışır)
-  useEffect(() => {
+    useEffect(() => {
     if (!FIREBASE_CONFIG || !FIREBASE_CONFIG.databaseURL) return;
     try {
-      const app = getApps().length
-        ? getApps()[0]
-        : initializeApp(FIREBASE_CONFIG);
-      const db = getDatabase(app);
-      dbRef.current = db;
+      const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
+      dbRef.current = getDatabase(app);
     } catch (err) {
       console.error("Firebase başlatılamadı:", err);
     }
   }, []);
 
-  // Lobi presence ve aktif kullanıcı listesi
   useEffect(() => {
     if (!enteredLobby) return;
     const cleanName = nickname.trim() || "Oyuncu";
 
     if (dbRef.current) {
       const userRef = ref(dbRef.current, `users/${myId}`);
-      set(userRef, {
-        id: myId,
-        name: cleanName,
-        status: myStatus,
-        updatedAt: Date.now(),
-      });
+      set(userRef, { id: myId, name: cleanName, status: myStatus, updatedAt: Date.now() });
       onDisconnect(userRef).remove();
 
-      const allUsersRef = ref(dbRef.current, "users");
-      const unsubUsers = onValue(allUsersRef, (snap) => {
+      const unsubUsers = onValue(ref(dbRef.current, "users"), (snap) => {
         const val = snap.val() || {};
-        const list = Object.values(val).filter((u) => u && u.id !== myId);
-        setUsers(list);
+        setUsers(Object.values(val).filter((u) => u && u.id !== myId));
       });
 
-      const inviteRef = ref(dbRef.current, `invites/${myId}`);
-      const unsubInvite = onValue(inviteRef, (snap) => {
+      const unsubInvite = onValue(ref(dbRef.current, `invites/${myId}`), (snap) => {
         const val = snap.val();
-        if (val && val.status === "pending") {
-          setIncomingInvite(val);
-        } else {
-          setIncomingInvite(null);
-        }
+        if (val && val.status === "pending") setIncomingInvite(val);
+        else setIncomingInvite(null);
       });
 
-      const globalRef = ref(dbRef.current, "chats/global");
-      const unsubGlobal = onValue(globalRef, (snap) => {
+      const unsubGlobal = onValue(ref(dbRef.current, "chats/global"), (snap) => {
         const val = snap.val() || {};
         const arr = Object.values(val).sort((a, b) => (a.ts || 0) - (b.ts || 0));
         if (arr.length > 0) {
@@ -484,7 +311,6 @@ export default function App() {
         unsubGlobal();
       };
     } else {
-      // Yerel test modu için örnek çevrimiçi rakipler
       setUsers([
         { id: "demo_alice", name: "Zeynep", status: "online" },
         { id: "demo_mert", name: "Mert", status: "online" },
@@ -493,11 +319,9 @@ export default function App() {
     }
   }, [enteredLobby, nickname, myId, myStatus, globalChatOpen]);
 
-  // Firebase maç odası senkronizasyonu
   useEffect(() => {
     if (!dbRef.current || !activeMatch || activeMatch.isBot) return;
-    const roomId = activeMatch.roomId;
-    const roomRef = ref(dbRef.current, `matches/${roomId}`);
+    const roomRef = ref(dbRef.current, `matches/${activeMatch.roomId}`);
     const unsub = onValue(roomRef, (snap) => {
       const data = snap.val();
       if (!data) return;
@@ -507,21 +331,14 @@ export default function App() {
           if (data.chatList.length > prev.length && !matchDrawerOpen) {
             const added = data.chatList.slice(prev.length);
             const fromOther = added.filter((m) => m.senderId !== myId).length;
-            if (fromOther > 0) {
-              setMatchUnread((u) => u + fromOther);
-            }
+            if (fromOther > 0) setMatchUnread((u) => u + fromOther);
           }
           return data.chatList;
         });
       }
 
       if (data.reaction && data.reaction.ts) {
-        setFloatingReaction((prev) => {
-          if (!prev || prev.ts !== data.reaction.ts) {
-            return data.reaction;
-          }
-          return prev;
-        });
+        setFloatingReaction((prev) => (!prev || prev.ts !== data.reaction.ts ? data.reaction : prev));
       }
 
       if (data.gameState) {
@@ -542,13 +359,32 @@ export default function App() {
         }
       }
     });
-
     return () => unsub();
   }, [activeMatch, myId, matchDrawerOpen]);
 
-  function resetAllGameStates(gameType, isBotMatch = false) {
-    const freshShips = autoPlaceShips(6);
-    setMyShipGrid(freshShips);
+  // Davet gönderen kişinin davet kabul edildiğinde maça girmesi
+  useEffect(() => {
+    if (!dbRef.current || !outgoingInvite || !outgoingInvite.toId) {
+      acceptedHandledRef.current = false;
+      return;
+    }
+    const targetInviteRef = ref(dbRef.current, `invites/${outgoingInvite.toId}`);
+    const unsub = onValue(targetInviteRef, (snap) => {
+      const val = snap.val();
+      if (val && val.status === "accepted" && val.roomId && !acceptedHandledRef.current) {
+        acceptedHandledRef.current = true;
+        const targetOpp = { id: outgoingInvite.toId, name: outgoingInvite.toName };
+        const gId = outgoingInvite.gameId;
+        const rId = val.roomId;
+        setOutgoingInvite(null);
+        remove(targetInviteRef);
+        startMatch(targetOpp, gId, false, rId);
+      }
+    });
+    return () => unsub();
+  }, [outgoingInvite]);
+    function resetAllGameStates(gameType, isBotMatch = false) {
+    setMyShipGrid(autoPlaceShips(6));
     setMyShotsOnEnemy(createEmptyGrid(6));
     setEnemyGridForBot(autoPlaceShips(6));
     setEnemyShotsOnMe(createEmptyGrid(6));
@@ -568,9 +404,7 @@ export default function App() {
     setTttTurn("X");
     setTttResult(null);
 
-    const chosenWord =
-      FINAL_WORDS[Math.floor(Math.random() * FINAL_WORDS.length)];
-    setWordTarget(chosenWord);
+    setWordTarget(FINAL_WORDS[Math.floor(Math.random() * FINAL_WORDS.length)]);
     setWordGuesses([]);
     setCurrentGuess("");
     setWordStatus("5 harfli kelimeyi bulmak için tahmin gir!");
@@ -590,9 +424,7 @@ export default function App() {
         id: "m_" + Date.now(),
         senderId: "sys",
         senderName: "Sistem",
-        text: `${
-          GAMES_META.find((g) => g.id === gameType)?.name || "Oyun"
-        } maçı başladı! Başarılar.`,
+        text: `${GAMES_META.find((g) => g.id === gameType)?.name || "Oyun"} maçı başladı! Başarılar.`,
         ts: Date.now(),
       },
     ]);
@@ -601,25 +433,18 @@ export default function App() {
     setFloatingReaction(null);
 
     if (isBotMatch && gameType === "sudoku") {
-      setTimeout(() => {
-        setOppSudokuProgress(35);
-      }, 2500);
+      setTimeout(() => setOppSudokuProgress(35), 2500);
     }
   }
 
   function startMatch(opponent, gameType, isBot = false, customRoomId = null) {
-    const roomId =
-      customRoomId ||
-      `room_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const roomId = customRoomId || `room_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const matchObj = {
       roomId,
       gameType,
       isBot,
       isHost: true,
-      opponent: {
-        id: opponent.id,
-        name: opponent.name,
-      },
+      opponent: { id: opponent.id, name: opponent.name },
     };
     resetAllGameStates(gameType, isBot);
     setActiveMatch(matchObj);
@@ -642,18 +467,13 @@ export default function App() {
             ts: Date.now(),
           },
         ],
-        gameState: {
-          board: Array(9).fill(""),
-          turn: "X",
-          round: 1,
-          p1Score: 0,
-          p2Score: 0,
-        },
+        gameState: { board: Array(9).fill(""), turn: "X", round: 1, p1Score: 0, p2Score: 0 },
       });
     }
   }
 
   function sendGameInvite(targetUser, gameId) {
+    acceptedHandledRef.current = false;
     const gameMeta = GAMES_META.find((g) => g.id === gameId) || GAMES_META[1];
     const invitePayload = {
       fromId: myId,
@@ -671,12 +491,9 @@ export default function App() {
       setOutgoingInvite(invitePayload);
       setSelectedTargetUser(null);
     } else {
-      // Yerel/demo modda davet gönderildiğinde hızlıca maç başlatma seçeneği sun
       setOutgoingInvite(invitePayload);
       setSelectedTargetUser(null);
-      setTimeout(() => {
-        startMatch(targetUser, gameMeta.id, false, `local_${Date.now()}`);
-      }, 900);
+      setTimeout(() => startMatch(targetUser, gameMeta.id, false, `local_${Date.now()}`), 900);
     }
   }
 
@@ -684,17 +501,14 @@ export default function App() {
     if (!incomingInvite) return;
     const roomId = `room_${Date.now()}`;
     if (dbRef.current) {
-      set(ref(dbRef.current, `invites/${myId}`), null);
+      update(ref(dbRef.current, `invites/${myId}`), { status: "accepted", roomId });
     }
     const matchObj = {
       roomId,
       gameType: incomingInvite.gameId,
       isBot: false,
       isHost: false,
-      opponent: {
-        id: incomingInvite.fromId,
-        name: incomingInvite.fromName,
-      },
+      opponent: { id: incomingInvite.fromId, name: incomingInvite.fromName },
     };
     resetAllGameStates(incomingInvite.gameId, false);
     setActiveMatch(matchObj);
@@ -703,23 +517,18 @@ export default function App() {
 
   function declineIncomingInvite() {
     if (!incomingInvite) return;
-    if (dbRef.current) {
-      set(ref(dbRef.current, `invites/${myId}`), null);
-    }
+    if (dbRef.current) set(ref(dbRef.current, `invites/${myId}`), null);
     setIncomingInvite(null);
   }
 
   function leaveMatch() {
     if (dbRef.current && activeMatch && !activeMatch.isBot) {
-      update(ref(dbRef.current, `matches/${activeMatch.roomId}`), {
-        leftBy: myId,
-      });
+      update(ref(dbRef.current, `matches/${activeMatch.roomId}`), { leftBy: myId });
     }
     setActiveMatch(null);
     setMatchDrawerOpen(false);
   }
 
-  // Lobi Genel Sohbet Gönderme
   function handleSendGlobalMessage(e) {
     e.preventDefault();
     const text = globalInput.trim();
@@ -732,15 +541,10 @@ export default function App() {
       ts: Date.now(),
     };
     setGlobalInput("");
-
-    if (dbRef.current) {
-      push(ref(dbRef.current, "chats/global"), msg);
-    } else {
-      setGlobalMessages((prev) => [...prev.slice(-49), msg]);
-    }
+    if (dbRef.current) push(ref(dbRef.current, "chats/global"), msg);
+    else setGlobalMessages((prev) => [...prev.slice(-49), msg]);
   }
 
-  // Özel Sohbet (DM) Gönderme
   function openDirectMessage(peer) {
     setDmTarget(peer);
     setDmUnreadByPeer((prev) => ({ ...prev, [peer.id]: 0 }));
@@ -751,7 +555,6 @@ export default function App() {
     if (!dmTarget) return;
     const text = dmInput.trim();
     if (!text) return;
-
     const msg = {
       id: "dm_" + Date.now(),
       senderId: myId,
@@ -759,43 +562,20 @@ export default function App() {
       text,
       ts: Date.now(),
     };
-
     setDmMessagesByPeer((prev) => ({
       ...prev,
       [dmTarget.id]: [...(prev[dmTarget.id] || []), msg],
     }));
     setDmInput("");
-
     if (dbRef.current) {
       const threadId = [myId, dmTarget.id].sort().join("__");
       push(ref(dbRef.current, `chats/dm/${threadId}`), msg);
-    } else {
-      setTimeout(() => {
-        const reply = {
-          id: "dm_rep_" + Date.now(),
-          senderId: dmTarget.id,
-          senderName: dmTarget.name,
-          text: `Selam ${nickname.trim() || "dostum"}! İstersen hemen bir oyun daveti atabilirsin 🎮`,
-          ts: Date.now(),
-        };
-        setDmMessagesByPeer((prev) => ({
-          ...prev,
-          [dmTarget.id]: [...(prev[dmTarget.id] || []), reply],
-        }));
-        setDmUnreadByPeer((prev) => ({
-          ...prev,
-          [dmTarget.id]:
-            dmTarget?.id === dmTarget.id ? 0 : (prev[dmTarget.id] || 0) + 1,
-        }));
-      }, 900);
     }
   }
 
-  // Oyun İçi Maç Sohbeti & Emoji Tepkisi
   function sendMatchChatText(rawText) {
     const text = (rawText || "").trim();
     if (!text || !activeMatch) return;
-
     const msg = {
       id: "mc_" + Date.now() + "_" + Math.random().toString(36).slice(2, 5),
       senderId: myId,
@@ -803,7 +583,6 @@ export default function App() {
       text,
       ts: Date.now(),
     };
-
     const nextList = [...matchMessages, msg];
     setMatchMessages(nextList);
     setMatchInput("");
@@ -822,45 +601,31 @@ export default function App() {
           ts: Date.now(),
         };
         setMatchMessages((prev) => [...prev, botMsg]);
-        if (!matchDrawerOpen) {
-          setMatchUnread((u) => u + 1);
-        }
+        if (!matchDrawerOpen) setMatchUnread((u) => u + 1);
       }, 750);
     }
   }
 
   function handleSendEmojiReaction(emoji) {
-    const reaction = {
-      emoji,
-      fromName: nickname.trim() || "Sen",
-      ts: Date.now(),
-    };
+    const reaction = { emoji, fromName: nickname.trim() || "Sen", ts: Date.now() };
     setFloatingReaction(reaction);
     if (dbRef.current && activeMatch && !activeMatch.isBot) {
-      update(ref(dbRef.current, `matches/${activeMatch.roomId}`), {
-        reaction,
-      });
+      update(ref(dbRef.current, `matches/${activeMatch.roomId}`), { reaction });
     }
-}
-    // --- OYUN 1: AMİRAL BATTI ---
-  function handleBattleshipAttack(r, c) {
-    if (bsWinner || bsTurn !== "me") return;
-    if (myShotsOnEnemy[r][c] !== 0) return;
-
-    const targetGrid = activeMatch?.isBot ? enemyGridForBot : enemyGridForBot;
-    const hit = targetGrid[r][c] === 1;
-
+  }
+    function handleBattleshipAttack(r, c) {
+    if (bsWinner || bsTurn !== "me" || myShotsOnEnemy[r][c] !== 0) return;
+    const hit = enemyGridForBot[r][c] === 1;
     const nextShots = myShotsOnEnemy.map((row, ri) =>
       row.map((val, ci) => (ri === r && ci === c ? (hit ? 2 : 1) : val))
     );
     setMyShotsOnEnemy(nextShots);
 
-    const totalShips = countShipCells(targetGrid);
+    const totalShips = countShipCells(enemyGridForBot);
     const myHits = nextShots.reduce(
       (sum, row) => sum + row.reduce((s, cell) => s + (cell === 2 ? 1 : 0), 0),
       0
     );
-
     if (totalShips > 0 && myHits >= totalShips) {
       setBsWinner("me");
       setBsStatus("Tebrikler! Düşman filosunu tamamen batırdın!");
@@ -868,11 +633,7 @@ export default function App() {
     }
 
     setBsTurn("opp");
-    setBsStatus(
-      hit
-        ? "İSABET! Rakip karşı saldırıya hazırlanıyor..."
-        : "ISKA! Rakibin sırası..."
-    );
+    setBsStatus(hit ? "İSABET! Rakip karşı saldırıya hazırlanıyor..." : "ISKA! Rakibin sırası...");
 
     setTimeout(() => {
       let er = Math.floor(Math.random() * 6);
@@ -909,7 +670,6 @@ export default function App() {
     }, 650);
   }
 
-  // --- OYUN 2: TAŞ KAĞIT MAKAS ---
   function handleRPSPick(choice) {
     if (rpsMatchWinner || rpsMyPick) return;
     const choices = ["rock", "paper", "scissors"];
@@ -933,12 +693,7 @@ export default function App() {
     setRpsMyScore(nextMyScore);
     setRpsOppScore(nextOppScore);
 
-    const labelMap = {
-      rock: "Taş",
-      paper: "Kağıt",
-      scissors: "Makas",
-    };
-
+    const labelMap = { rock: "Taş", paper: "Kağıt", scissors: "Makas" };
     const msg =
       outcome === "win"
         ? `Tur ${rpsRound}: ${labelMap[choice]} > ${labelMap[oppChoice]} — Sen kazandın!`
@@ -958,13 +713,9 @@ export default function App() {
 
     if (rpsRound >= 3 || nextMyScore === 2 || nextOppScore === 2) {
       setTimeout(() => {
-        if (nextMyScore > nextOppScore) {
-          setRpsMatchWinner("me");
-        } else if (nextOppScore > nextMyScore) {
-          setRpsMatchWinner("opp");
-        } else {
-          setRpsMatchWinner("draw");
-        }
+        if (nextMyScore > nextOppScore) setRpsMatchWinner("me");
+        else if (nextOppScore > nextMyScore) setRpsMatchWinner("opp");
+        else setRpsMatchWinner("draw");
       }, 700);
     } else {
       setTimeout(() => {
@@ -976,7 +727,6 @@ export default function App() {
     }
   }
 
-  // --- OYUN 3: TİC TAC TOE ---
   function handleTTTMove(idx) {
     if (tttResult || tttBoard[idx]) return;
     if (!activeMatch?.isBot && tttTurn !== "X") return;
@@ -1004,8 +754,7 @@ export default function App() {
           .map((v, i) => (v === "" ? i : -1))
           .filter((i) => i !== -1);
         if (emptyIndices.length === 0) return;
-        const botChoice =
-          emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+        const botChoice = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
         const afterBot = [...nextBoard];
         afterBot[botChoice] = "O";
         const botRes = checkTTTWinner(afterBot);
@@ -1016,7 +765,6 @@ export default function App() {
     }
   }
 
-  // --- OYUN 4: KELİME BULMA ---
   function handleWordKey(key) {
     if (wordFinished) return;
     if (key === "SIL") {
@@ -1029,16 +777,10 @@ export default function App() {
         return;
       }
       const evalRow = evaluateWordleGuess(currentGuess, wordTarget);
-      const nextGuesses = [
-        ...wordGuesses,
-        { word: currentGuess, eval: evalRow },
-      ];
+      const nextGuesses = [...wordGuesses, { word: currentGuess, eval: evalRow }];
       setWordGuesses(nextGuesses);
       setCurrentGuess("");
-
-      if (activeMatch?.isBot) {
-        setOppWordProgress((p) => Math.min(100, p + 22));
-      }
+      if (activeMatch?.isBot) setOppWordProgress((p) => Math.min(100, p + 22));
 
       if (currentGuess === wordTarget) {
         setWordStatus(`Harika! "${wordTarget}" kelimesini buldun!`);
@@ -1051,12 +793,9 @@ export default function App() {
       }
       return;
     }
-    if (currentGuess.length < 5) {
-      setCurrentGuess((g) => g + key);
-    }
+    if (currentGuess.length < 5) setCurrentGuess((g) => g + key);
   }
 
-  // --- OYUN 5: 4x4 SUDOKU ---
   function handleSudokuNumber(num) {
     if (sudokuWinner) return;
     const [r, c] = selectedCell;
@@ -1075,9 +814,7 @@ export default function App() {
     for (let i = 0; i < 4; i++) {
       for (let j = 0; j < 4; j++) {
         if (nextBoard[i][j] !== 0) filledCount++;
-        if (nextBoard[i][j] !== puzzle.solution[i][j]) {
-          allCorrect = false;
-        }
+        if (nextBoard[i][j] !== puzzle.solution[i][j]) allCorrect = false;
       }
     }
 
@@ -1095,8 +832,7 @@ export default function App() {
     if (!dmTarget) return [];
     return dmMessagesByPeer[dmTarget.id] || [];
   }, [dmTarget, dmMessagesByPeer]);
-    // --- GİRİŞ EKRANI ---
-  if (!enteredLobby) {
+    if (!enteredLobby) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-5 select-none">
         <div className="max-w-md w-full mx-auto my-auto space-y-6">
@@ -1104,9 +840,7 @@ export default function App() {
             <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 mb-1">
               <Gamepad2 className="w-8 h-8" />
             </div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-white">
-              Düello Arenası
-            </h1>
+            <h1 className="text-3xl font-extrabold tracking-tight text-white">Düello Arenası</h1>
             <p className="text-sm text-slate-400">
               Aktif oyuncularla eşleş, sohbet et ve 5 farklı oyunda yarış.
             </p>
@@ -1124,7 +858,6 @@ export default function App() {
               placeholder="Örn: Emirhan"
               className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-base"
             />
-
             <button
               onClick={() => setEnteredLobby(true)}
               className="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-[0.99] transition font-bold text-white flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25"
@@ -1153,25 +886,21 @@ export default function App() {
         <p className="text-center text-[11px] text-slate-500">
           {FIREBASE_CONFIG?.databaseURL
             ? "Firebase Realtime Database bağlı"
-            : "Yerel & Bot modu aktif (Firebase eklendiğinde çoklu cihaz senkronize çalışır)"}
+            : "Yerel & Bot modu aktif"}
         </p>
       </div>
     );
   }
 
-  // --- AKTİF MAÇ EKRANI ---
   if (activeMatch) {
-    const gameInfo =
-      GAMES_META.find((g) => g.id === activeMatch.gameType) || GAMES_META[1];
+    const gameInfo = GAMES_META.find((g) => g.id === activeMatch.gameType) || GAMES_META[1];
 
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-20 relative">
         {floatingReaction && (
           <div className="fixed top-20 right-5 z-50 bg-slate-900/95 border border-slate-700 px-3.5 py-2 rounded-2xl shadow-2xl flex items-center gap-2 animate-bounce">
             <span className="text-2xl">{floatingReaction.emoji}</span>
-            <span className="text-xs font-medium text-slate-300">
-              {floatingReaction.fromName}
-            </span>
+            <span className="text-xs font-medium text-slate-300">{floatingReaction.fromName}</span>
           </div>
         )}
 
@@ -1195,7 +924,6 @@ export default function App() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => resetAllGameStates(activeMatch.gameType, activeMatch.isBot)}
-              title="Yeniden Başlat"
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200"
             >
               <RotateCcw className="w-4 h-4" />
@@ -1239,7 +967,7 @@ export default function App() {
 
               <div>
                 <div className="text-xs font-semibold text-slate-400 mb-1.5 flex justify-between">
-                  <span>DÜŞMAN DENİZİ (Saldırmak için dokun)</span>
+                  <span>DÜŞMAN DENİZİ</span>
                   <span>{bsTurn === "me" ? "Sıra Sende" : "Rakibin Sırası"}</span>
                 </div>
                 <div className="grid grid-cols-6 gap-1.5 bg-slate-900 p-2.5 rounded-2xl border border-slate-800">
@@ -1264,9 +992,7 @@ export default function App() {
               </div>
 
               <div>
-                <div className="text-xs font-semibold text-slate-400 mb-1.5">
-                  SENİN FİLON
-                </div>
+                <div className="text-xs font-semibold text-slate-400 mb-1.5">SENİN FİLON</div>
                 <div className="grid grid-cols-6 gap-1 bg-slate-900/70 p-2 rounded-2xl border border-slate-800/80">
                   {myShipGrid.map((row, r) =>
                     row.map((cell, c) => {
@@ -1301,25 +1027,17 @@ export default function App() {
                 <div className="flex items-center justify-between text-center">
                   <div className="flex-1">
                     <div className="text-xs text-slate-400">Sen</div>
-                    <div className="text-3xl font-extrabold text-indigo-400">
-                      {rpsMyScore}
-                    </div>
+                    <div className="text-3xl font-extrabold text-indigo-400">{rpsMyScore}</div>
                   </div>
                   <div className="px-3 py-1 rounded-full bg-slate-800 text-xs font-bold text-slate-300">
                     TUR {Math.min(rpsRound, 3)}/3
                   </div>
                   <div className="flex-1">
-                    <div className="text-xs text-slate-400">
-                      {activeMatch.opponent.name}
-                    </div>
-                    <div className="text-3xl font-extrabold text-rose-400">
-                      {rpsOppScore}
-                    </div>
+                    <div className="text-xs text-slate-400">{activeMatch.opponent.name}</div>
+                    <div className="text-3xl font-extrabold text-rose-400">{rpsOppScore}</div>
                   </div>
                 </div>
-                <p className="mt-3 text-center text-sm font-medium text-slate-200">
-                  {rpsRoundText}
-                </p>
+                <p className="mt-3 text-center text-sm font-medium text-slate-200">{rpsRoundText}</p>
               </div>
 
               {(rpsMyPick || rpsOppPick) && (
@@ -1327,21 +1045,13 @@ export default function App() {
                   <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
                     <div className="text-xs text-slate-400 mb-1">Seçimin</div>
                     <div className="text-4xl">
-                      {rpsMyPick === "rock"
-                        ? "🪨"
-                        : rpsMyPick === "paper"
-                        ? "📄"
-                        : "✂️"}
+                      {rpsMyPick === "rock" ? "🪨" : rpsMyPick === "paper" ? "📄" : "✂️"}
                     </div>
                   </div>
                   <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
                     <div className="text-xs text-slate-400 mb-1">Rakip</div>
                     <div className="text-4xl">
-                      {rpsOppPick === "rock"
-                        ? "🪨"
-                        : rpsOppPick === "paper"
-                        ? "📄"
-                        : "✂️"}
+                      {rpsOppPick === "rock" ? "🪨" : rpsOppPick === "paper" ? "📄" : "✂️"}
                     </div>
                   </div>
                 </div>
@@ -1378,9 +1088,7 @@ export default function App() {
                       className="py-5 rounded-2xl bg-slate-900 hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 disabled:opacity-50 flex flex-col items-center gap-2 transition active:scale-95"
                     >
                       <span className="text-3xl">{item.emoji}</span>
-                      <span className="text-xs font-bold text-slate-200">
-                        {item.label}
-                      </span>
+                      <span className="text-xs font-bold text-slate-200">{item.label}</span>
                     </button>
                   ))}
                 </div>
@@ -1401,8 +1109,7 @@ export default function App() {
                   </p>
                 ) : (
                   <p className="text-sm font-semibold text-slate-200">
-                    Sıra:{" "}
-                    <span className="text-indigo-400 font-bold">{tttTurn}</span>
+                    Sıra: <span className="text-indigo-400 font-bold">{tttTurn}</span>
                   </p>
                 )}
               </div>
@@ -1436,9 +1143,7 @@ export default function App() {
                     {activeMatch.gameType === "wordle" && (
             <div className="space-y-3">
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2">
-                <p className="text-xs font-medium text-slate-200 text-center">
-                  {wordStatus}
-                </p>
+                <p className="text-xs font-medium text-slate-200 text-center">{wordStatus}</p>
                 {activeMatch.isBot && (
                   <div className="space-y-1">
                     <div className="flex justify-between text-[11px] text-slate-400">
@@ -1446,10 +1151,7 @@ export default function App() {
                       <span>%{oppWordProgress}</span>
                     </div>
                     <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-amber-400 transition-all"
-                        style={{ width: `${oppWordProgress}%` }}
-                      />
+                      <div className="h-full bg-amber-400 transition-all" style={{ width: `${oppWordProgress}%` }} />
                     </div>
                   </div>
                 )}
@@ -1517,9 +1219,7 @@ export default function App() {
           {activeMatch.gameType === "sudoku" && (
             <div className="space-y-4">
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2">
-                <p className="text-sm font-semibold text-center text-indigo-300">
-                  {sudokuMessage}
-                </p>
+                <p className="text-sm font-semibold text-center text-indigo-300">{sudokuMessage}</p>
                 {activeMatch.isBot && (
                   <div className="space-y-1">
                     <div className="flex justify-between text-[11px] text-slate-400">
@@ -1527,10 +1227,7 @@ export default function App() {
                       <span>%{oppSudokuProgress}</span>
                     </div>
                     <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-emerald-400 transition-all"
-                        style={{ width: `${oppSudokuProgress}%` }}
-                      />
+                      <div className="h-full bg-emerald-400 transition-all" style={{ width: `${oppSudokuProgress}%` }} />
                     </div>
                   </div>
                 )}
@@ -1575,7 +1272,6 @@ export default function App() {
           )}
         </main>
 
-        {/* Oyun İçi Sohbet Çekmecesi */}
         {matchDrawerOpen && (
           <div className="fixed inset-x-0 bottom-14 z-40 max-w-md mx-auto bg-slate-900 border-t border-x border-slate-700 rounded-t-3xl shadow-2xl p-4 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -1583,10 +1279,7 @@ export default function App() {
                 <MessageCircle className="w-4 h-4 text-indigo-400" />
                 Maç Sohbeti ({activeMatch.opponent.name})
               </span>
-              <button
-                onClick={() => setMatchDrawerOpen(false)}
-                className="p-1 rounded-lg bg-slate-800 text-slate-300"
-              >
+              <button onClick={() => setMatchDrawerOpen(false)} className="p-1 rounded-lg bg-slate-800 text-slate-300">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1594,34 +1287,13 @@ export default function App() {
             <div className="h-44 overflow-y-auto space-y-2 pr-1">
               {matchMessages.map((m) => {
                 const mine = m.senderId === myId;
-                const sys = m.senderId === "sys";
-                if (sys) {
-                  return (
-                    <div
-                      key={m.id}
-                      className="text-center text-[11px] text-slate-400 py-1"
-                    >
-                      {m.text}
-                    </div>
-                  );
+                if (m.senderId === "sys") {
+                  return <div key={m.id} className="text-center text-[11px] text-slate-400 py-1">{m.text}</div>;
                 }
                 return (
-                  <div
-                    key={m.id}
-                    className={`flex flex-col ${
-                      mine ? "items-end" : "items-start"
-                    }`}
-                  >
-                    <span className="text-[10px] text-slate-400 mb-0.5">
-                      {m.senderName}
-                    </span>
-                    <div
-                      className={`px-3 py-1.5 rounded-2xl text-xs max-w-[80%] ${
-                        mine
-                          ? "bg-indigo-600 text-white"
-                          : "bg-slate-800 text-slate-100"
-                      }`}
-                    >
+                  <div key={m.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
+                    <span className="text-[10px] text-slate-400 mb-0.5">{m.senderName}</span>
+                    <div className={`px-3 py-1.5 rounded-2xl text-xs max-w-[80%] ${mine ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-100"}`}>
                       {m.text}
                     </div>
                   </div>
@@ -1655,10 +1327,7 @@ export default function App() {
                 placeholder="Rakibine mesaj yaz..."
                 className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
               />
-              <button
-                type="submit"
-                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
-              >
+              <button type="submit" className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white">
                 <Send className="w-4 h-4" />
               </button>
             </form>
@@ -1696,7 +1365,7 @@ export default function App() {
       </div>
     );
   }
-    // --- LOBİ EKRANI ---
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-12">
       <header className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between">
@@ -1705,15 +1374,10 @@ export default function App() {
             <Gamepad2 className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-base font-extrabold leading-tight text-white">
-              Düello Arenası
-            </h1>
-            <p className="text-xs text-emerald-400">
-              ● {nickname.trim() || "Oyuncu"} (Çevrimiçi)
-            </p>
+            <h1 className="text-base font-extrabold leading-tight text-white">Düello Arenası</h1>
+            <p className="text-xs text-emerald-400">● {nickname.trim() || "Oyuncu"} (Çevrimiçi)</p>
           </div>
         </div>
-
         <button
           onClick={() => setEnteredLobby(false)}
           className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300"
@@ -1731,10 +1395,7 @@ export default function App() {
             </div>
             <p className="text-sm text-white">
               <span className="font-bold">{incomingInvite.fromName}</span> seni{" "}
-              <span className="font-bold text-amber-300">
-                {incomingInvite.gameName}
-              </span>{" "}
-              oynamaya davet ediyor!
+              <span className="font-bold text-amber-300">{incomingInvite.gameName}</span> oynamaya davet ediyor!
             </p>
             <div className="grid grid-cols-2 gap-2.5">
               <button
@@ -1758,20 +1419,12 @@ export default function App() {
         {outgoingInvite && (
           <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-3.5 flex items-center justify-between">
             <div className="text-xs">
-              <span className="text-amber-300 font-bold">
-                {outgoingInvite.toName}
-              </span>{" "}
-              kişisine{" "}
-              <span className="font-semibold text-white">
-                {outgoingInvite.gameName}
-              </span>{" "}
-              daveti gönderildi...
+              <span className="text-amber-300 font-bold">{outgoingInvite.toName}</span> kişisine{" "}
+              <span className="font-semibold text-white">{outgoingInvite.gameName}</span> daveti gönderildi...
             </div>
             <button
               onClick={() => {
-                if (dbRef.current) {
-                  remove(ref(dbRef.current, `invites/${outgoingInvite.toId}`));
-                }
+                if (dbRef.current) remove(ref(dbRef.current, `invites/${outgoingInvite.toId}`));
                 setOutgoingInvite(null);
               }}
               className="text-xs text-slate-400 hover:text-white underline ml-2"
@@ -1785,13 +1438,9 @@ export default function App() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Bot className="w-5 h-5 text-indigo-400" />
-              <h2 className="text-sm font-bold text-white">
-                Pratik Yap (Botla Oyna)
-              </h2>
+              <h2 className="text-sm font-bold text-white">Pratik Yap (Botla Oyna)</h2>
             </div>
-            <span className="text-[11px] text-indigo-300 font-medium">
-              Anında Başla
-            </span>
+            <span className="text-[11px] text-indigo-300 font-medium">Anında Başla</span>
           </div>
           <div className="grid grid-cols-2 gap-2">
             {GAMES_META.map((g) => {
@@ -1799,19 +1448,13 @@ export default function App() {
               return (
                 <button
                   key={g.id}
-                  onClick={() =>
-                    startMatch({ id: "bot_arena", name: "Arena Botu" }, g.id, true)
-                  }
+                  onClick={() => startMatch({ id: "bot_arena", name: "Arena Botu" }, g.id, true)}
                   className="p-2.5 rounded-xl bg-slate-950/80 hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/40 text-left flex items-center gap-2.5 transition active:scale-[0.98]"
                 >
                   <IconComp className="w-4 h-4 text-indigo-400 shrink-0" />
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">
-                      {g.name}
-                    </div>
-                    <div className="text-[10px] text-slate-400 truncate">
-                      {g.badge}
-                    </div>
+                    <div className="text-xs font-bold text-white truncate">{g.name}</div>
+                    <div className="text-[10px] text-slate-400 truncate">{g.badge}</div>
                   </div>
                 </button>
               );
@@ -1825,9 +1468,7 @@ export default function App() {
               <Users className="w-4 h-4 text-emerald-400" />
               Aktif Oyuncular ({users.length})
             </h2>
-            <span className="text-[11px] text-slate-400">
-              Davet et veya mesaj at
-            </span>
+            <span className="text-[11px] text-slate-400">Davet et veya mesaj at</span>
           </div>
 
           {users.length === 0 ? (
@@ -1845,18 +1486,10 @@ export default function App() {
                     className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-2"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <CircleDot
-                        className={`w-3.5 h-3.5 shrink-0 ${
-                          isBusy ? "text-amber-400" : "text-emerald-400"
-                        }`}
-                      />
+                      <CircleDot className={`w-3.5 h-3.5 shrink-0 ${isBusy ? "text-amber-400" : "text-emerald-400"}`} />
                       <div className="truncate">
-                        <div className="text-sm font-semibold text-white truncate">
-                          {u.name}
-                        </div>
-                        <div className="text-[11px] text-slate-400">
-                          {isBusy ? "Oyunda" : "Müsait"}
-                        </div>
+                        <div className="text-sm font-semibold text-white truncate">{u.name}</div>
+                        <div className="text-[11px] text-slate-400">{isBusy ? "Oyunda" : "Müsait"}</div>
                       </div>
                     </div>
 
@@ -1864,7 +1497,6 @@ export default function App() {
                       <button
                         onClick={() => openDirectMessage(u)}
                         className="relative p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200"
-                        title="Özel Mesaj"
                       >
                         <MessageCircle className="w-4 h-4" />
                         {unreadDm > 0 && (
@@ -1923,22 +1555,9 @@ export default function App() {
                 {globalMessages.map((m) => {
                   const mine = m.senderId === myId;
                   return (
-                    <div
-                      key={m.id}
-                      className={`flex flex-col ${
-                        mine ? "items-end" : "items-start"
-                      }`}
-                    >
-                      <span className="text-[10px] text-slate-400 mb-0.5">
-                        {m.senderName}
-                      </span>
-                      <div
-                        className={`px-3 py-1.5 rounded-2xl text-xs max-w-[82%] ${
-                          mine
-                            ? "bg-indigo-600 text-white"
-                            : "bg-slate-800 text-slate-100"
-                        }`}
-                      >
+                    <div key={m.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
+                      <span className="text-[10px] text-slate-400 mb-0.5">{m.senderName}</span>
+                      <div className={`px-3 py-1.5 rounded-2xl text-xs max-w-[82%] ${mine ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-100"}`}>
                         {m.text}
                       </div>
                     </div>
@@ -1946,146 +1565,7 @@ export default function App() {
                 })}
               </div>
 
-              <form onSubmit={handleSendGlobalMessage} className="flex gap-2">
-                <input
-                  type="text"
-                  value={globalInput}
-                  onChange={(e) => setGlobalInput(e.target.value)}
-                  placeholder="Lobiye mesaj yaz..."
-                  className="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </form>
-            </>
-          )}
-        </section>
-      </main>
-
-      {selectedTargetUser && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-extrabold text-white">
-                  {selectedTargetUser.name} kişisine davet gönder
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Oynamak istediğiniz oyunu seçin
-                </p>
-              </div>
-              <button
-                onClick={() => setSelectedTargetUser(null)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {GAMES_META.map((g) => {
-                const IconComp = g.icon;
-                const active = selectedGameForInvite === g.id;
-                return (
-                  <button
-                    key={g.id}
-                    onClick={() => setSelectedGameForInvite(g.id)}
-                    className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between transition ${
-                      active
-                        ? "bg-indigo-600/20 border-indigo-500 text-white"
-                        : "bg-slate-950/70 border-slate-800 text-slate-300"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <IconComp className="w-5 h-5 text-indigo-400" />
-                      <div>
-                        <div className="text-sm font-bold">{g.name}</div>
-                        <div className="text-xs text-slate-400">{g.desc}</div>
-                      </div>
-                    </div>
-                    {active && <Check className="w-4 h-4 text-indigo-400" />}
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              onClick={() =>
-                sendGameInvite(selectedTargetUser, selectedGameForInvite)
-              }
-              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-sm text-white"
-            >
-              Daveti Gönder
-            </button>
-          </div>
-        </div>
-      )}
-
-      {dmTarget && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-4 space-y-3 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-              <div>
-                <h3 className="text-sm font-extrabold text-white">
-                  {dmTarget.name}
-                </h3>
-                <p className="text-[11px] text-emerald-400">Özel Sohbet</p>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => {
-                    const target = dmTarget;
-                    setDmTarget(null);
-                    setSelectedTargetUser(target);
-                  }}
-                  className="px-2.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs font-bold"
-                >
-                  Oyun Daveti
-                </button>
-                <button
-                  onClick={() => setDmTarget(null)}
-                  className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="h-52 overflow-y-auto space-y-2 p-2 bg-slate-950/70 rounded-2xl border border-slate-800">
-              {activeDmList.length === 0 ? (
-                <p className="text-center text-xs text-slate-500 pt-16">
-                  {dmTarget.name} ile ilk mesajı sen gönder.
-                </p>
-              ) : (
-                activeDmList.map((m) => {
-                  const mine = m.senderId === myId;
-                  return (
-                    <div
-                      key={m.id}
-                      className={`flex flex-col ${
-                        mine ? "items-end" : "items-start"
-                      }`}
-                    >
-                      <div
-                        className={`px-3 py-1.5 rounded-2xl text-xs max-w-[80%] ${
-                          mine
-                            ? "bg-indigo-600 text-white"
-                            : "bg-slate-800 text-slate-100"
-                        }`}
-                      >
-                        {m.text}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            <form onSubmit={handleSendDirectMessage} className="flex gap-2">
+               <form onSubmit={handleSendDirectMessage} className="flex gap-2">
               <input
                 type="text"
                 value={dmInput}
@@ -2093,10 +1573,7 @@ export default function App() {
                 placeholder={`${dmTarget.name} kişisine yaz...`}
                 className="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
               />
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
-              >
+              <button type="submit" className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white">
                 <Send className="w-4 h-4" />
               </button>
             </form>
@@ -2104,5 +1581,4 @@ export default function App() {
         </div>
       )}
     </div>
-  );
-}
+   
