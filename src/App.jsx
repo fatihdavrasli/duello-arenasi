@@ -38,6 +38,8 @@ const FIREBASE_CONFIG =
     ? window.__FIREBASE_CONFIG__
     : null;
 
+const MESSAGE_TTL_MS = 60 * 60 * 1000; // 1 saat
+
 const GAMES_META = [
   { id: "battleship", name: "Amiral Battı", desc: "6x6 hızlı deniz savaşı", badge: "Strateji", icon: Ship },
   { id: "rps", name: "Taş Kağıt Makas", desc: "5 turluk düello", badge: "5 Tur", icon: Swords },
@@ -55,9 +57,9 @@ const RPS_CHOICES = [
 ];
 
 const FINAL_WORDS = [
-  "KALEM", "KITAP", "DENIZ", "BULUT", "MASAL", "BAHCE", "SEHIR", "MUZIK",
-  "SABAH", "ORMAN", "LIMAN", "SAHIL", "KAVUN", "BARIS", "MARTI", "DALGA",
-  "KAVUS", "RADYO", "MELEK", "TARLA",
+  "KALEM", "KİTAP", "DENİZ", "BULUT", "MASAL", "BAHÇE", "ŞEHİR", "MÜZİK",
+  "SABAH", "ORMAN", "LİMAN", "SAHİL", "KAVUN", "BARIŞ", "MARTI", "DALGA",
+  "RADYO", "MELEK", "TARLA", "GÜNEŞ",
 ];
 
 const SUDOKU_PUZZLES = [
@@ -93,6 +95,12 @@ const SUDOKU_PUZZLES = [
 
 const QUICK_REPLIES = ["İyi hamle! 👏", "Şanslıydın 😄", "Çok yakındı! 🔥", "Rövanş? 🔄"];
 const EMOJIS = ["👏", "😂", "🔥", "😱", "🤔", "👑"];
+
+function isWithinOneHour(ts, nowMs = Date.now()) {
+  const numericTs = Number(ts || 0);
+  if (!numericTs) return false;
+  return nowMs - numericTs < MESSAGE_TTL_MS;
+}
 
 function createEmptyGrid(size = 6) {
   return Array.from({ length: size }, () => Array(size).fill(0));
@@ -139,8 +147,16 @@ function countShipCells(grid) {
   );
 }
 
+function countHitsOnGrid(shotsGrid) {
+  if (!Array.isArray(shotsGrid)) return 0;
+  return shotsGrid.reduce(
+    (sum, row) => sum + row.reduce((s, cell) => s + (cell === 2 ? 1 : 0), 0),
+    0
+  );
+}
+
 function getBotChatReply(text, gameType) {
-  const lower = (text || "").toLowerCase();
+  const lower = (text || "").toLocaleLowerCase("tr");
   if (lower.includes("rövanş") || lower.includes("tekrar")) return "Hemen bir rövanş daha atalım, hazırım! 🔥";
   if (lower.includes("şans") || lower.includes("nasıl")) return "Tamamen hesaplanmış strateji 😄";
   if (gameType === "battleship") return "Radarlarım açık, gemilerim sağlam! 🚢";
@@ -166,8 +182,8 @@ function checkTTTWinner(board) {
 
 function evaluateWordleGuess(guess, target) {
   const res = Array(5).fill("absent");
-  const targetArr = target.split("");
-  const guessArr = guess.split("");
+  const targetArr = Array.from(target);
+  const guessArr = Array.from(guess);
   const used = Array(5).fill(false);
 
   for (let i = 0; i < 5; i++) {
@@ -187,6 +203,22 @@ function evaluateWordleGuess(guess, target) {
     }
   }
   return res;
+}
+
+function hasSudokuConflict(board, r, c, val) {
+  if (!val) return false;
+  for (let i = 0; i < 4; i++) {
+    if (i !== c && board[r][i] === val) return true;
+    if (i !== r && board[i][c] === val) return true;
+  }
+  const br = Math.floor(r / 2) * 2;
+  const bc = Math.floor(c / 2) * 2;
+  for (let i = br; i < br + 2; i++) {
+    for (let j = bc; j < bc + 2; j++) {
+      if ((i !== r || j !== c) && board[i][j] === val) return true;
+    }
+  }
+  return false;
 }
 
 function getRPSLabel(choice) {
@@ -253,8 +285,8 @@ export default function App() {
       id: "m_init_1",
       senderId: "sys",
       senderName: "Arena Botu",
-      text: "Düello Arenası'na hoş geldin! Aktif oyuncularla sohbet edebilir veya meydan okuyabilirsin.",
-      ts: Date.now() - 60000,
+      text: "Düello Arenası'na hoş geldin! Sohbet mesajları 1 saat sonra otomatik silinir.",
+      ts: Date.now() - 10000,
     },
   ]);
   const [globalInput, setGlobalInput] = useState("");
@@ -282,6 +314,7 @@ export default function App() {
     }
   });
 
+  // Amiral Battı state
   const [myShipGrid, setMyShipGrid] = useState(() => autoPlaceShips(6));
   const [myShotsOnEnemy, setMyShotsOnEnemy] = useState(() => createEmptyGrid(6));
   const [enemyGridForBot, setEnemyGridForBot] = useState(() => autoPlaceShips(6));
@@ -290,6 +323,7 @@ export default function App() {
   const [bsStatus, setBsStatus] = useState("Sıra sende! Düşman denizinde bir kare seç.");
   const [bsWinner, setBsWinner] = useState(null);
 
+  // Taş Kağıt Makas state
   const [rpsRound, setRpsRound] = useState(1);
   const [rpsMyScore, setRpsMyScore] = useState(0);
   const [rpsOppScore, setRpsOppScore] = useState(0);
@@ -297,15 +331,17 @@ export default function App() {
   const [rpsOppPick, setRpsOppPick] = useState(null);
   const [rpsLastShownMyPick, setRpsLastShownMyPick] = useState(null);
   const [rpsLastShownOppPick, setRpsLastShownOppPick] = useState(null);
-  const [rpsPhase, setRpsPhase] = useState("picking"); // "picking" | "revealing" | "finished"
+  const [rpsPhase, setRpsPhase] = useState("picking");
   const [rpsRoundText, setRpsRoundText] = useState(`1/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
   const [rpsMatchWinner, setRpsMatchWinner] = useState(null);
   const [rpsHistory, setRpsHistory] = useState([]);
 
+  // Tic Tac Toe state
   const [tttBoard, setTttBoard] = useState(Array(9).fill(""));
   const [tttTurn, setTttTurn] = useState("X");
   const [tttResult, setTttResult] = useState(null);
 
+  // Kelime Bulma state
   const [wordTarget, setWordTarget] = useState(
     () => FINAL_WORDS[Math.floor(Math.random() * FINAL_WORDS.length)]
   );
@@ -315,6 +351,7 @@ export default function App() {
   const [wordFinished, setWordFinished] = useState(false);
   const [oppWordProgress, setOppWordProgress] = useState(0);
 
+  // Sudoku state
   const [sudokuIndex, setSudokuIndex] = useState(0);
   const [sudokuBoard, setSudokuBoard] = useState(() =>
     SUDOKU_PUZZLES[0].puzzle.map((r) => [...r])
@@ -327,15 +364,35 @@ export default function App() {
   const dbRef = useRef(null);
   const acceptedHandledRef = useRef(false);
   const rpsTimerRef = useRef(null);
+  const botBsTimerRef = useRef(null);
+  const botTttTimerRef = useRef(null);
+  const botWordTimerRef = useRef(null);
+  const botSudokuTimerRef = useRef(null);
   const processedLiveRoundRef = useRef(0);
   const awardedMatchIdRef = useRef(null);
   const leftNoticeShownRef = useRef(false);
   const myStatus = activeMatch ? "in_game" : "online";
 
-  function clearRPSTimer() {
+  function clearAllGameTimers() {
     if (rpsTimerRef.current) {
       clearTimeout(rpsTimerRef.current);
       rpsTimerRef.current = null;
+    }
+    if (botBsTimerRef.current) {
+      clearTimeout(botBsTimerRef.current);
+      botBsTimerRef.current = null;
+    }
+    if (botTttTimerRef.current) {
+      clearTimeout(botTttTimerRef.current);
+      botTttTimerRef.current = null;
+    }
+    if (botWordTimerRef.current) {
+      clearTimeout(botWordTimerRef.current);
+      botWordTimerRef.current = null;
+    }
+    if (botSudokuTimerRef.current) {
+      clearTimeout(botSudokuTimerRef.current);
+      botSudokuTimerRef.current = null;
     }
   }
 
@@ -359,7 +416,44 @@ export default function App() {
   }
 
   useEffect(() => {
-    return () => clearRPSTimer();
+    return () => clearAllGameTimers();
+  }, []);
+
+  // 1 saatlik sohbet mesajlarını periyodik temizleme
+  useEffect(() => {
+    const pruneExpiredMessages = () => {
+      const nowMs = Date.now();
+      setGlobalMessages((prev) =>
+        prev.filter((m) => m.senderId === "sys" || isWithinOneHour(m.ts, nowMs))
+      );
+      setDmMessagesByPeer((prev) => {
+        const nextMap = {};
+        for (const [peerId, list] of Object.entries(prev)) {
+          nextMap[peerId] = (list || []).filter((m) => isWithinOneHour(m.ts, nowMs));
+        }
+        return nextMap;
+      });
+      setIncomingDm((prev) => (prev && isWithinOneHour(prev.ts, nowMs) ? prev : null));
+
+      if (dbRef.current) {
+        onValue(
+          ref(dbRef.current, "chats/global"),
+          (snap) => {
+            const val = snap.val() || {};
+            for (const [key, msg] of Object.entries(val)) {
+              if (!isWithinOneHour(msg?.ts, nowMs)) {
+                remove(ref(dbRef.current, `chats/global/${key}`));
+              }
+            }
+          },
+          { onlyOnce: true }
+        );
+      }
+    };
+
+    pruneExpiredMessages();
+    const interval = setInterval(pruneExpiredMessages, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -415,7 +509,14 @@ export default function App() {
 
       const unsubGlobal = onValue(ref(dbRef.current, "chats/global"), (snap) => {
         const val = snap.val() || {};
-        const arr = Object.values(val).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        const nowMs = Date.now();
+        const validEntries = Object.entries(val).filter(([, m]) => isWithinOneHour(m?.ts, nowMs));
+        for (const [key, m] of Object.entries(val)) {
+          if (!isWithinOneHour(m?.ts, nowMs)) {
+            remove(ref(dbRef.current, `chats/global/${key}`));
+          }
+        }
+        const arr = validEntries.map(([, m]) => m).sort((a, b) => (a.ts || 0) - (b.ts || 0));
         if (arr.length > 0) {
           setGlobalMessages(arr.slice(-50));
           const last = arr[arr.length - 1];
@@ -450,7 +551,15 @@ export default function App() {
 
       return onValue(dmRef, (snap) => {
         const val = snap.val() || {};
-        const arr = Object.values(val).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        const nowMs = Date.now();
+        const validPairs = Object.entries(val).filter(([, m]) => isWithinOneHour(m?.ts, nowMs));
+        for (const [key, m] of Object.entries(val)) {
+          if (!isWithinOneHour(m?.ts, nowMs)) {
+            remove(ref(dbRef.current, `chats/dm/${threadId}/${key}`));
+          }
+        }
+
+        const arr = validPairs.map(([, m]) => m).sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
         if (!initialized) {
           initialized = true;
@@ -504,7 +613,10 @@ export default function App() {
     const dmRef = ref(dbRef.current, `chats/dm/${threadId}`);
     const unsub = onValue(dmRef, (snap) => {
       const val = snap.val() || {};
-      const arr = Object.values(val).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      const nowMs = Date.now();
+      const arr = Object.values(val)
+        .filter((m) => isWithinOneHour(m?.ts, nowMs))
+        .sort((a, b) => (a.ts || 0) - (b.ts || 0));
       setDmMessagesByPeer((prev) => ({
         ...prev,
         [dmTarget.id]: arr.slice(-60),
@@ -522,7 +634,7 @@ export default function App() {
 
       if (data.leftBy && data.leftBy !== myId && !leftNoticeShownRef.current) {
         leftNoticeShownRef.current = true;
-        clearRPSTimer();
+        clearAllGameTimers();
         setActiveMatch(null);
         setMatchDrawerOpen(false);
         if (typeof window !== "undefined") {
@@ -554,10 +666,47 @@ export default function App() {
         const gs = data.gameState;
         const isP1 = activeMatch.isHost;
 
-        if (activeMatch.gameType === "ttt" && Array.isArray(gs.board)) {
+        if (activeMatch.gameType === "battleship") {
+          const p1Ships = Array.isArray(gs.p1Ships) ? gs.p1Ships : autoPlaceShips(6);
+          const p2Ships = Array.isArray(gs.p2Ships) ? gs.p2Ships : autoPlaceShips(6);
+          const p1Shots = Array.isArray(gs.p1Shots) ? gs.p1Shots : createEmptyGrid(6);
+          const p2Shots = Array.isArray(gs.p2Shots) ? gs.p2Shots : createEmptyGrid(6);
+          const turnSide = gs.bsTurn || "p1";
+
+          setMyShipGrid(isP1 ? p1Ships : p2Ships);
+          setMyShotsOnEnemy(isP1 ? p1Shots : p2Shots);
+          setEnemyShotsOnMe(isP1 ? p2Shots : p1Shots);
+
+          const myTurnNow = (isP1 && turnSide === "p1") || (!isP1 && turnSide === "p2");
+          setBsTurn(myTurnNow ? "me" : "opp");
+
+          if (gs.bsWinner) {
+            const wonMe = (isP1 && gs.bsWinner === "p1") || (!isP1 && gs.bsWinner === "p2");
+            setBsWinner(wonMe ? "me" : "opp");
+            setBsStatus(
+              wonMe
+                ? "Tebrikler! Düşman filosunu tamamen batırdın!"
+                : "Rakip tüm gemilerini batırdı!"
+            );
+            if (wonMe) {
+              awardWinPoint(`${activeMatch.roomId}_bs_final`);
+            }
+          } else {
+            setBsStatus(
+              gs.bsStatus ||
+                (myTurnNow ? "Sıra sende! Düşman denizinde bir kare seç." : "Rakibin hamlesi bekleniyor...")
+            );
+          }
+        } else if (activeMatch.gameType === "ttt" && Array.isArray(gs.board)) {
           setTttBoard(gs.board);
           setTttTurn(gs.turn || "X");
           setTttResult(gs.result || null);
+          if (gs.result && gs.result.winner && gs.result.winner !== "draw") {
+            const myMark = isP1 ? "X" : "O";
+            if (gs.result.winner === myMark) {
+              awardWinPoint(`${activeMatch.roomId}_ttt_win`);
+            }
+          }
         } else if (activeMatch.gameType === "rps") {
           const roundNum = gs.round || 1;
           const p1Score = gs.p1Score || 0;
@@ -611,7 +760,7 @@ export default function App() {
               newEntry,
             ].sort((a, b) => a.round - b.round);
 
-            clearRPSTimer();
+            if (rpsTimerRef.current) clearTimeout(rpsTimerRef.current);
             update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`), {
               phase: "revealing",
               p1Score: nextP1Score,
@@ -712,15 +861,20 @@ export default function App() {
   }, [outgoingInvite]);
 
   function resetAllGameStates(gameType, isBotMatch = false, roomIdForSync = null, isHostForSync = true) {
-    clearRPSTimer();
+    clearAllGameTimers();
     processedLiveRoundRef.current = 0;
     awardedMatchIdRef.current = null;
     leftNoticeShownRef.current = false;
 
-    setMyShipGrid(autoPlaceShips(6));
-    setMyShotsOnEnemy(createEmptyGrid(6));
-    setEnemyGridForBot(autoPlaceShips(6));
-    setEnemyShotsOnMe(createEmptyGrid(6));
+    const freshMyShips = autoPlaceShips(6);
+    const freshOppShips = autoPlaceShips(6);
+    const emptyShotsA = createEmptyGrid(6);
+    const emptyShotsB = createEmptyGrid(6);
+
+    setMyShipGrid(freshMyShips);
+    setMyShotsOnEnemy(emptyShotsA);
+    setEnemyGridForBot(freshOppShips);
+    setEnemyShotsOnMe(emptyShotsB);
     setBsTurn("me");
     setBsStatus("Sıra sende! Düşman denizinde bir kare seç.");
     setBsWinner(null);
@@ -736,20 +890,6 @@ export default function App() {
     setRpsRoundText(`1/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
     setRpsMatchWinner(null);
     setRpsHistory([]);
-
-    if (gameType === "rps" && !isBotMatch && dbRef.current && roomIdForSync && isHostForSync) {
-      update(ref(dbRef.current, `matches/${roomIdForSync}/gameState`), {
-        phase: "picking",
-        round: 1,
-        p1Score: 0,
-        p2Score: 0,
-        p1Pick: null,
-        p2Pick: null,
-        history: [],
-        winner: null,
-        roundText: `1/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`,
-      });
-    }
 
     setTttBoard(Array(9).fill(""));
     setTttTurn("X");
@@ -770,6 +910,30 @@ export default function App() {
     setSudokuWinner(null);
     setOppSudokuProgress(0);
 
+    if (!isBotMatch && dbRef.current && roomIdForSync && isHostForSync) {
+      update(ref(dbRef.current, `matches/${roomIdForSync}/gameState`), {
+        phase: "picking",
+        bsTurn: "p1",
+        bsWinner: null,
+        bsStatus: "Sıra sende! Düşman denizinde bir kare seç.",
+        p1Ships: freshMyShips,
+        p2Ships: freshOppShips,
+        p1Shots: emptyShotsA,
+        p2Shots: emptyShotsB,
+        board: Array(9).fill(""),
+        turn: "X",
+        result: null,
+        round: 1,
+        p1Score: 0,
+        p2Score: 0,
+        p1Pick: null,
+        p2Pick: null,
+        history: [],
+        winner: null,
+        roundText: `1/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`,
+      });
+    }
+
     setMatchMessages([
       {
         id: "m_" + Date.now(),
@@ -784,7 +948,7 @@ export default function App() {
     setFloatingReaction(null);
 
     if (isBotMatch && gameType === "sudoku") {
-      setTimeout(() => setOppSudokuProgress(35), 2500);
+      botSudokuTimerRef.current = setTimeout(() => setOppSudokuProgress(40), 2200);
     }
   }
 
@@ -821,8 +985,16 @@ export default function App() {
         ],
         gameState: {
           phase: "picking",
+          bsTurn: "p1",
+          bsWinner: null,
+          bsStatus: "Sıra sende! Düşman denizinde bir kare seç.",
+          p1Ships: autoPlaceShips(6),
+          p2Ships: autoPlaceShips(6),
+          p1Shots: createEmptyGrid(6),
+          p2Shots: createEmptyGrid(6),
           board: Array(9).fill(""),
           turn: "X",
+          result: null,
           round: 1,
           p1Score: 0,
           p2Score: 0,
@@ -882,7 +1054,7 @@ export default function App() {
   }
 
   function leaveMatch() {
-    clearRPSTimer();
+    clearAllGameTimers();
     if (dbRef.current && activeMatch && !activeMatch.isBot) {
       update(ref(dbRef.current, `matches/${activeMatch.roomId}`), { leftBy: myId });
     }
@@ -893,15 +1065,15 @@ export default function App() {
     }
   }
 
-  function handleRequestNewRPSMatch() {
+  function handleRequestNewMatch(gameType) {
     if (!activeMatch) return;
     if (activeMatch.isBot) {
-      resetAllGameStates("rps", true, activeMatch.roomId, activeMatch.isHost);
+      resetAllGameStates(gameType, true, activeMatch.roomId, activeMatch.isHost);
       return;
     }
     const targetOpp = activeMatch.opponent;
     leaveMatch();
-    sendGameInvite(targetOpp, "rps");
+    sendGameInvite(targetOpp, gameType);
   }
 
   function handleSendGlobalMessage(e) {
@@ -993,6 +1165,42 @@ export default function App() {
 
   function handleBattleshipAttack(r, c) {
     if (bsWinner || bsTurn !== "me" || myShotsOnEnemy[r][c] !== 0) return;
+
+    if (activeMatch && !activeMatch.isBot && dbRef.current) {
+      const roomGsRef = ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`);
+      onValue(
+        roomGsRef,
+        (snap) => {
+          const gs = snap.val() || {};
+          const isP1 = activeMatch.isHost;
+          const enemyShips = isP1 ? gs.p2Ships || autoPlaceShips(6) : gs.p1Ships || autoPlaceShips(6);
+          const currentMyShots = (isP1 ? gs.p1Shots : gs.p2Shots) || createEmptyGrid(6);
+          if (gs.bsWinner || currentMyShots[r][c] !== 0) return;
+
+          const hit = enemyShips[r][c] === 1;
+          const nextShots = currentMyShots.map((row, ri) =>
+            row.map((val, ci) => (ri === r && ci === c ? (hit ? 2 : 1) : val))
+          );
+          const totalEnemyShips = countShipCells(enemyShips);
+          const myTotalHits = countHitsOnGrid(nextShots);
+          const wonNow = totalEnemyShips > 0 && myTotalHits >= totalEnemyShips;
+
+          update(roomGsRef, {
+            [isP1 ? "p1Shots" : "p2Shots"]: nextShots,
+            bsWinner: wonNow ? (isP1 ? "p1" : "p2") : null,
+            bsTurn: wonNow ? (isP1 ? "p1" : "p2") : isP1 ? "p2" : "p1",
+            bsStatus: wonNow
+              ? "Tebrikler! Düşman filosunu tamamen batırdın!"
+              : hit
+              ? `İSABET (${r + 1},${c + 1})! Rakibin sırası...`
+              : `ISKA (${r + 1},${c + 1})! Rakibin sırası...`,
+          });
+        },
+        { onlyOnce: true }
+      );
+      return;
+    }
+
     const hit = enemyGridForBot[r][c] === 1;
     const nextShots = myShotsOnEnemy.map((row, ri) =>
       row.map((val, ci) => (ri === r && ci === c ? (hit ? 2 : 1) : val))
@@ -1000,10 +1208,7 @@ export default function App() {
     setMyShotsOnEnemy(nextShots);
 
     const totalShips = countShipCells(enemyGridForBot);
-    const myHits = nextShots.reduce(
-      (sum, row) => sum + row.reduce((s, cell) => s + (cell === 2 ? 1 : 0), 0),
-      0
-    );
+    const myHits = countHitsOnGrid(nextShots);
     if (totalShips > 0 && myHits >= totalShips) {
       setBsWinner("me");
       setBsStatus("Tebrikler! Düşman filosunu tamamen batırdın!");
@@ -1014,14 +1219,26 @@ export default function App() {
     setBsTurn("opp");
     setBsStatus(hit ? "İSABET! Rakip karşı saldırıya hazırlanıyor..." : "ISKA! Rakibin sırası...");
 
-    setTimeout(() => {
+    if (botBsTimerRef.current) clearTimeout(botBsTimerRef.current);
+    botBsTimerRef.current = setTimeout(() => {
       let er = Math.floor(Math.random() * 6);
       let ec = Math.floor(Math.random() * 6);
       let guard = 0;
-      while (enemyShotsOnMe[er][ec] !== 0 && guard < 100) {
+      while (enemyShotsOnMe[er][ec] !== 0 && guard < 120) {
         er = Math.floor(Math.random() * 6);
         ec = Math.floor(Math.random() * 6);
         guard++;
+      }
+      if (enemyShotsOnMe[er][ec] !== 0) {
+        for (let i = 0; i < 6; i++) {
+          for (let j = 0; j < 6; j++) {
+            if (enemyShotsOnMe[i][j] === 0) {
+              er = i;
+              ec = j;
+              break;
+            }
+          }
+        }
       }
       const oppHit = myShipGrid[er][ec] === 1;
       const nextOppShots = enemyShotsOnMe.map((row, ri) =>
@@ -1030,10 +1247,7 @@ export default function App() {
       setEnemyShotsOnMe(nextOppShots);
 
       const myTotal = countShipCells(myShipGrid);
-      const oppHits = nextOppShots.reduce(
-        (sum, row) => sum + row.reduce((s, cell) => s + (cell === 2 ? 1 : 0), 0),
-        0
-      );
+      const oppHits = countHitsOnGrid(nextOppShots);
       if (myTotal > 0 && oppHits >= myTotal) {
         setBsWinner("opp");
         setBsStatus("Rakip tüm gemilerini batırdı! Rövanş ister misin?");
@@ -1063,7 +1277,7 @@ export default function App() {
       return;
     }
 
-    clearRPSTimer();
+    if (rpsTimerRef.current) clearTimeout(rpsTimerRef.current);
     const choices = ["rock", "paper", "scissors"];
     const oppChoice = choices[Math.floor(Math.random() * choices.length)];
     const currentRoundNum = rpsRound;
@@ -1130,64 +1344,118 @@ export default function App() {
 
   function handleTTTMove(idx) {
     if (tttResult || tttBoard[idx]) return;
-    if (!activeMatch?.isBot && tttTurn !== "X") return;
+
+    if (activeMatch && !activeMatch.isBot) {
+      const myMark = activeMatch.isHost ? "X" : "O";
+      if (tttTurn !== myMark) return;
+
+      const nextBoard = [...tttBoard];
+      nextBoard[idx] = myMark;
+      const res = checkTTTWinner(nextBoard);
+      const nextTurn = myMark === "X" ? "O" : "X";
+
+      setTttBoard(nextBoard);
+      setTttTurn(nextTurn);
+      setTttResult(res);
+
+      if (res && res.winner === myMark) {
+        awardWinPoint(`${activeMatch.roomId}_ttt_${nextBoard.join("")}`);
+      }
+
+      if (dbRef.current) {
+        update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`), {
+          board: nextBoard,
+          turn: nextTurn,
+          result: res,
+        });
+      }
+      return;
+    }
 
     const nextBoard = [...tttBoard];
-    nextBoard[idx] = tttTurn;
+    nextBoard[idx] = "X";
     const res = checkTTTWinner(nextBoard);
-    const nextTurn = tttTurn === "X" ? "O" : "X";
-
     setTttBoard(nextBoard);
-    setTttTurn(nextTurn);
     setTttResult(res);
 
-    if (res && res.winner === "X") {
-      awardWinPoint(`${activeMatch?.roomId}_ttt_${nextBoard.join("")}`);
+    if (res) {
+      if (res.winner === "X") {
+        awardWinPoint(`${activeMatch?.roomId}_ttt_bot_${nextBoard.join("")}`);
+      }
+      return;
     }
 
-    if (dbRef.current && activeMatch && !activeMatch.isBot) {
-      update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`), {
-        board: nextBoard,
-        turn: nextTurn,
-        result: res,
-      });
-    }
+    setTttTurn("O");
+    if (botTttTimerRef.current) clearTimeout(botTttTimerRef.current);
+    botTttTimerRef.current = setTimeout(() => {
+      const emptyIndices = nextBoard
+        .map((v, i) => (v === "" ? i : -1))
+        .filter((i) => i !== -1);
+      if (emptyIndices.length === 0) return;
 
-    if (!res && activeMatch?.isBot && nextTurn === "O") {
-      setTimeout(() => {
-        const emptyIndices = nextBoard
-          .map((v, i) => (v === "" ? i : -1))
-          .filter((i) => i !== -1);
-        if (emptyIndices.length === 0) return;
-        const botChoice = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
-        const afterBot = [...nextBoard];
-        afterBot[botChoice] = "O";
-        const botRes = checkTTTWinner(afterBot);
-        setTttBoard(afterBot);
-        setTttTurn("X");
-        setTttResult(botRes);
-      }, 450);
-    }
+      const winLines = [
+        [0, 1, 2], [3, 4, 5], [6, 7, 8],
+        [0, 3, 6], [1, 4, 7], [2, 5, 8],
+        [0, 4, 8], [2, 4, 6],
+      ];
+      let chosen = null;
+      for (const [a, b, c] of winLines) {
+        const lineVals = [nextBoard[a], nextBoard[b], nextBoard[c]];
+        if (lineVals.filter((x) => x === "O").length === 2 && lineVals.includes("")) {
+          chosen = [a, b, c][lineVals.indexOf("")];
+          break;
+        }
+      }
+      if (chosen === null) {
+        for (const [a, b, c] of winLines) {
+          const lineVals = [nextBoard[a], nextBoard[b], nextBoard[c]];
+          if (lineVals.filter((x) => x === "X").length === 2 && lineVals.includes("")) {
+            chosen = [a, b, c][lineVals.indexOf("")];
+            break;
+          }
+        }
+      }
+      if (chosen === null) {
+        chosen = emptyIndices.includes(4)
+          ? 4
+          : emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+      }
+
+      const afterBot = [...nextBoard];
+      afterBot[chosen] = "O";
+      const botRes = checkTTTWinner(afterBot);
+      setTttBoard(afterBot);
+      setTttTurn("X");
+      setTttResult(botRes);
+    }, 450);
   }
 
   function handleWordKey(key) {
     if (wordFinished) return;
     if (key === "SIL") {
-      setCurrentGuess((g) => g.slice(0, -1));
+      setCurrentGuess((g) => Array.from(g).slice(0, -1).join(""));
       return;
     }
     if (key === "GIR") {
-      if (currentGuess.length !== 5) {
+      const chars = Array.from(currentGuess);
+      if (chars.length !== 5) {
         setWordStatus("Lütfen 5 harf gir.");
         return;
       }
-      const evalRow = evaluateWordleGuess(currentGuess, wordTarget);
-      const nextGuesses = [...wordGuesses, { word: currentGuess, eval: evalRow }];
+      const normalizedGuess = chars.join("");
+      const evalRow = evaluateWordleGuess(normalizedGuess, wordTarget);
+      const nextGuesses = [...wordGuesses, { word: normalizedGuess, eval: evalRow }];
       setWordGuesses(nextGuesses);
       setCurrentGuess("");
-      if (activeMatch?.isBot) setOppWordProgress((p) => Math.min(100, p + 22));
 
-      if (currentGuess === wordTarget) {
+      if (activeMatch?.isBot) {
+        if (botWordTimerRef.current) clearTimeout(botWordTimerRef.current);
+        botWordTimerRef.current = setTimeout(() => {
+          setOppWordProgress((p) => Math.min(100, p + 25));
+        }, 500);
+      }
+
+      if (normalizedGuess === wordTarget) {
         setWordStatus(`Harika! "${wordTarget}" kelimesini buldun!`);
         setWordFinished(true);
         awardWinPoint(`${activeMatch?.roomId}_wordle_${wordTarget}`);
@@ -1199,7 +1467,9 @@ export default function App() {
       }
       return;
     }
-    if (currentGuess.length < 5) setCurrentGuess((g) => g + key);
+    if (Array.from(currentGuess).length < 5) {
+      setCurrentGuess((g) => g + key);
+    }
   }
 
   function handleSudokuNumber(num) {
@@ -1215,6 +1485,7 @@ export default function App() {
     );
     setSudokuBoard(nextBoard);
 
+    const conflict = hasSudokuConflict(nextBoard, r, c, num);
     let filledCount = 0;
     let allCorrect = true;
     for (let i = 0; i < 4; i++) {
@@ -1228,17 +1499,41 @@ export default function App() {
       setSudokuWinner("me");
       setSudokuMessage("4x4 Sudoku'yu hatasız tamamladın! Kazandın!");
       awardWinPoint(`${activeMatch?.roomId}_sudoku_${sudokuIndex}`);
+    } else if (conflict) {
+      setSudokuMessage(`(${r + 1},${c + 1}) konumunda satır, sütun veya 2x2 kutuda çakışma var!`);
     } else if (filledCount === 16) {
-      setSudokuMessage("Bazı karelerde çakışma var, kontrol et!");
+      setSudokuMessage("Tüm kareler dolu ama bazı rakamlar farklı, tekrar kontrol et!");
     } else {
-      setSudokuMessage(`İlerleme: ${Math.round((filledCount / 16) * 100)}%`);
+      setSudokuMessage(`İlerleme: %${Math.round((filledCount / 16) * 100)}`);
     }
   }
 
+  const wordLetterStatuses = useMemo(() => {
+    const map = {};
+    const priority = { absent: 1, present: 2, correct: 3 };
+    for (const g of wordGuesses) {
+      const letters = Array.from(g.word);
+      letters.forEach((ch, i) => {
+        const st = g.eval[i];
+        const prev = map[ch];
+        if (!prev || priority[st] > priority[prev]) {
+          map[ch] = st;
+        }
+      });
+    }
+    return map;
+  }, [wordGuesses]);
+
   const activeDmList = useMemo(() => {
     if (!dmTarget) return [];
-    return dmMessagesByPeer[dmTarget.id] || [];
+    const nowMs = Date.now();
+    return (dmMessagesByPeer[dmTarget.id] || []).filter((m) => isWithinOneHour(m.ts, nowMs));
   }, [dmTarget, dmMessagesByPeer]);
+
+  const visibleGlobalMessages = useMemo(() => {
+    const nowMs = Date.now();
+    return globalMessages.filter((m) => m.senderId === "sys" || isWithinOneHour(m.ts, nowMs));
+  }, [globalMessages]);
 
   const leaderboardList = useMemo(() => {
     const cleanName = nickname.trim() || "Oyuncu";
@@ -1300,8 +1595,8 @@ export default function App() {
               <div>Amiral Battı, Sudoku...</div>
             </div>
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
-              <div className="font-semibold text-slate-200">Canlı Sohbet</div>
-              <div>Lobi, DM & Maç İçi</div>
+              <div className="font-semibold text-slate-200">1 Saatlik Sohbet</div>
+              <div>Otomatik temizlenir</div>
             </div>
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
               <div className="font-semibold text-slate-200">Liderlik</div>
@@ -1323,6 +1618,8 @@ export default function App() {
     const gameInfo = GAMES_META.find((g) => g.id === activeMatch.gameType) || GAMES_META[1];
     const shownMyPick = rpsMyPick || rpsLastShownMyPick;
     const shownOppPick = rpsOppPick || rpsLastShownOppPick;
+    const totalShipCells = countShipCells(enemyGridForBot);
+    const myHitCells = countHitsOnGrid(myShotsOnEnemy);
 
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-20 relative">
@@ -1392,12 +1689,23 @@ export default function App() {
         <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4">
           {activeMatch.gameType === "battleship" && (
             <div className="space-y-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 text-center">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 text-center space-y-1">
                 <p className="text-sm font-semibold text-indigo-300">{bsStatus}</p>
+                <p className="text-[11px] text-slate-400">
+                  Düşman Hedef İsabeti: {myHitCells}/{totalShipCells}
+                </p>
                 {bsWinner && (
-                  <p className="mt-1 text-base font-extrabold text-emerald-400">
-                    {bsWinner === "me" ? "KAZANDIN! (+1 Puan) 🎉" : "RAKİP KAZANDI!"}
-                  </p>
+                  <div className="pt-2 space-y-2">
+                    <p className="text-base font-extrabold text-emerald-400">
+                      {bsWinner === "me" ? "KAZANDIN! (+1 Puan) 🎉" : "RAKİP KAZANDI!"}
+                    </p>
+                    <button
+                      onClick={() => handleRequestNewMatch("battleship")}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                    >
+                      {activeMatch.isBot ? "Yeni Amiral Battı Maçı" : "Yeni Maç Daveti Gönder"}
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -1411,13 +1719,14 @@ export default function App() {
                     row.map((cell, c) => (
                       <button
                         key={`atk-${r}-${c}`}
+                        disabled={Boolean(bsWinner) || bsTurn !== "me" || cell !== 0}
                         onClick={() => handleBattleshipAttack(r, c)}
                         className={`aspect-square rounded-lg font-bold text-sm flex items-center justify-center transition ${
                           cell === 2
                             ? "bg-rose-600 text-white"
                             : cell === 1
                             ? "bg-slate-700 text-slate-400"
-                            : "bg-sky-950/80 hover:bg-sky-900 border border-sky-800/50 text-sky-200"
+                            : "bg-sky-950/80 hover:bg-sky-900 disabled:opacity-60 border border-sky-800/50 text-sky-200"
                         }`}
                       >
                         {cell === 2 ? "💥" : cell === 1 ? "•" : ""}
@@ -1559,7 +1868,7 @@ export default function App() {
                       : `5 Tur Berabere Bitti! (${rpsMyScore}-${rpsOppScore})`}
                   </div>
                   <button
-                    onClick={handleRequestNewRPSMatch}
+                    onClick={() => handleRequestNewMatch("rps")}
                     className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-sm text-white"
                   >
                     {activeMatch.isBot ? "Yeni 5 Turluk Maç" : "Yeni 5 Turluk Maç (Davet Gönder)"}
@@ -1592,18 +1901,29 @@ export default function App() {
 
           {activeMatch.gameType === "ttt" && (
             <div className="space-y-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 text-center">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 text-center space-y-2">
                 {tttResult ? (
-                  <p className="text-base font-extrabold text-emerald-400">
-                    {tttResult.winner === "draw"
-                      ? "Berabere!"
-                      : tttResult.winner === "X"
-                      ? "X (Sen) Kazandın! (+1 Puan)"
-                      : "O (Rakip) Kazandı!"}
-                  </p>
+                  <>
+                    <p className="text-base font-extrabold text-emerald-400">
+                      {tttResult.winner === "draw"
+                        ? "Berabere!"
+                        : tttResult.winner === (activeMatch.isBot || activeMatch.isHost ? "X" : "O")
+                        ? "Kazandın! (+1 Puan)"
+                        : "Rakip Kazandı!"}
+                    </p>
+                    <button
+                      onClick={() => handleRequestNewMatch("ttt")}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                    >
+                      {activeMatch.isBot ? "Yeni Tic Tac Toe Maçı" : "Yeni Maç Daveti Gönder"}
+                    </button>
+                  </>
                 ) : (
                   <p className="text-sm font-semibold text-slate-200">
-                    Sıra: <span className="text-indigo-400 font-bold">{tttTurn}</span>
+                    Sıra: <span className="text-indigo-400 font-bold">{tttTurn}</span>{" "}
+                    <span className="text-xs text-slate-400">
+                      (Senin taşın: {activeMatch.isBot || activeMatch.isHost ? "X" : "O"})
+                    </span>
                   </p>
                 )}
               </div>
@@ -1614,6 +1934,7 @@ export default function App() {
                   return (
                     <button
                       key={idx}
+                      disabled={Boolean(tttResult) || Boolean(cell)}
                       onClick={() => handleTTTMove(idx)}
                       className={`rounded-2xl text-4xl font-black flex items-center justify-center border transition ${
                         isWinCell
@@ -1650,19 +1971,31 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                {wordFinished && (
+                  <div className="pt-1 text-center">
+                    <button
+                      onClick={() => handleRequestNewMatch("wordle")}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                    >
+                      {activeMatch.isBot ? "Yeni Kelime Turu" : "Yeni Maç Daveti Gönder"}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5 max-w-[290px] mx-auto">
                 {Array.from({ length: 6 }).map((_, rowIdx) => {
                   const guessObj = wordGuesses[rowIdx];
                   const isCurrentRow = rowIdx === wordGuesses.length && !wordFinished;
+                  const currentChars = Array.from(currentGuess);
                   return (
                     <div key={rowIdx} className="grid grid-cols-5 gap-1.5">
                       {Array.from({ length: 5 }).map((__, colIdx) => {
+                        const guessChars = guessObj ? Array.from(guessObj.word) : [];
                         const letter = guessObj
-                          ? guessObj.word[colIdx]
+                          ? guessChars[colIdx] || ""
                           : isCurrentRow
-                          ? currentGuess[colIdx] || ""
+                          ? currentChars[colIdx] || ""
                           : "";
                         const status = guessObj ? guessObj.eval[colIdx] : null;
                         const colorClass =
@@ -1694,17 +2027,28 @@ export default function App() {
                   ["GIR", "Z", "C", "V", "B", "N", "M", "Ö", "Ç", "SIL"],
                 ].map((kRow, rIdx) => (
                   <div key={rIdx} className="flex justify-center gap-1">
-                    {kRow.map((k) => (
-                      <button
-                        key={k}
-                        onClick={() => handleWordKey(k)}
-                        className={`${
-                          k === "GIR" || k === "SIL" ? "px-2.5 text-[11px]" : "w-7 text-xs"
-                        } h-9 rounded-lg bg-slate-800 hover:bg-slate-700 font-bold text-slate-100 active:scale-95`}
-                      >
-                        {k === "GIR" ? "GİR" : k === "SIL" ? "⌫" : k}
-                      </button>
-                    ))}
+                    {kRow.map((k) => {
+                      const keySt = wordLetterStatuses[k];
+                      const keyStyle =
+                        keySt === "correct"
+                          ? "bg-emerald-600 text-white"
+                          : keySt === "present"
+                          ? "bg-amber-500 text-slate-950"
+                          : keySt === "absent"
+                          ? "bg-slate-900 text-slate-500 border border-slate-800"
+                          : "bg-slate-800 hover:bg-slate-700 text-slate-100";
+                      return (
+                        <button
+                          key={k}
+                          onClick={() => handleWordKey(k)}
+                          className={`${
+                            k === "GIR" || k === "SIL" ? "px-2.5 text-[11px]" : "w-7 text-xs"
+                          } h-9 rounded-lg ${keyStyle} font-bold active:scale-95`}
+                        >
+                          {k === "GIR" ? "GİR" : k === "SIL" ? "⌫" : k}
+                        </button>
+                      );
+                    })}
                   </div>
                 ))}
               </div>
@@ -1726,6 +2070,16 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                {sudokuWinner && (
+                  <div className="pt-1 text-center">
+                    <button
+                      onClick={() => handleRequestNewMatch("sudoku")}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                    >
+                      {activeMatch.isBot ? "Yeni Sudoku Bulmacası" : "Yeni Maç Daveti Gönder"}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-4 gap-2 max-w-[280px] mx-auto bg-slate-900 p-2.5 rounded-2xl border border-slate-800">
@@ -1733,12 +2087,15 @@ export default function App() {
                   row.map((val, c) => {
                     const isFixed = SUDOKU_PUZZLES[sudokuIndex].puzzle[r][c] !== 0;
                     const isSelected = selectedCell[0] === r && selectedCell[1] === c;
+                    const conflict = !isFixed && val !== 0 && hasSudokuConflict(sudokuBoard, r, c, val);
                     return (
                       <button
                         key={`${r}-${c}`}
                         onClick={() => setSelectedCell([r, c])}
                         className={`aspect-square rounded-xl text-xl font-extrabold flex items-center justify-center border transition ${
-                          isSelected
+                          conflict
+                            ? "border-rose-500 bg-rose-950/60 text-rose-300"
+                            : isSelected
                             ? "border-indigo-400 bg-indigo-600/30 text-white"
                             : isFixed
                             ? "border-slate-700 bg-slate-800/90 text-amber-300"
@@ -2141,7 +2498,7 @@ export default function App() {
           {globalChatOpen && (
             <>
               <div className="h-44 overflow-y-auto space-y-2 pr-1 bg-slate-950/60 rounded-xl p-2.5 border border-slate-800/70">
-                {globalMessages.map((m) => {
+                {visibleGlobalMessages.map((m) => {
                   const mine = m.senderId === myId;
                   return (
                     <div key={m.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
@@ -2159,7 +2516,7 @@ export default function App() {
                   type="text"
                   value={globalInput}
                   onChange={(e) => setGlobalInput(e.target.value)}
-                  placeholder="Lobiye mesaj yaz..."
+                  placeholder="Lobiye mesaj yaz (1 saatte silinir)..."
                   className="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
                 />
                 <button type="submit" className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white">
@@ -2227,7 +2584,7 @@ export default function App() {
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
               <div>
                 <h3 className="text-sm font-extrabold text-white">{dmTarget.name}</h3>
-                <p className="text-[11px] text-emerald-400">Özel Sohbet</p>
+                <p className="text-[11px] text-emerald-400">Özel Sohbet • 1 saatte silinir</p>
               </div>
               <div className="flex items-center gap-1.5">
                 <button
