@@ -32,6 +32,11 @@ import {
   ChevronUp,
   Bell,
   Clock,
+  Shield,
+  Trash2,
+  Ban,
+  Flag,
+  Lock,
 } from "lucide-react";
 
 const FIREBASE_CONFIG =
@@ -116,6 +121,24 @@ const INITIAL_KNOWN_PLAYERS = [
 
 const QUICK_REPLIES = ["İyi hamle! 👏", "Şanslıydın 😄", "Çok yakındı! 🔥", "Rövanş? 🔄"];
 const EMOJIS = ["👏", "😂", "🔥", "😱", "🤔", "👑"];
+
+function isReservedFdName(rawName) {
+  return String(rawName || "").trim().toLocaleUpperCase("tr") === "FD";
+}
+
+function hashSecret(secret) {
+  const input = `fd_arena_salt::${String(secret || "")}`;
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
+}
 
 function formatRelativeTime(ts) {
   const numericTs = Number(ts || 0);
@@ -312,10 +335,34 @@ export default function App() {
     if (typeof window === "undefined") return "";
     return window.localStorage.getItem("duello_nickname") || "";
   });
+  const [fdPasswordInput, setFdPasswordInput] = useState("");
+  const [fdPasswordConfirm, setFdPasswordConfirm] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [storedFdAuth, setStoredFdAuth] = useState(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem("duello_fd_auth");
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isFdAuthenticated, setIsFdAuthenticated] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("duello_fd_authed") === "1";
+  });
+
   const [enteredLobby, setEnteredLobby] = useState(() => {
     if (typeof window === "undefined") return false;
-    return window.localStorage.getItem("duello_entered_lobby") === "1";
+    const savedName = window.localStorage.getItem("duello_nickname") || "";
+    const wasEntered = window.localStorage.getItem("duello_entered_lobby") === "1";
+    if (!wasEntered || !savedName.trim()) return false;
+    if (isReservedFdName(savedName) && window.localStorage.getItem("duello_fd_authed") !== "1") {
+      return false;
+    }
+    return true;
   });
+
   const [myId] = useState(() => {
     if (typeof window === "undefined") return "usr_guest";
     const existing = window.localStorage.getItem("duello_my_id");
@@ -344,6 +391,11 @@ export default function App() {
   });
 
   const [users, setUsers] = useState([]);
+  const [bannedUsers, setBannedUsers] = useState({});
+  const [reportsList, setReportsList] = useState([]);
+  const [reportTargetUser, setReportTargetUser] = useState(null);
+  const [reportReason, setReportReason] = useState("");
+
   const [incomingInvite, setIncomingInvite] = useState(null);
   const [outgoingInvite, setOutgoingInvite] = useState(null);
   const [noticeBanner, setNoticeBanner] = useState(null);
@@ -446,6 +498,10 @@ export default function App() {
   const leftNoticeShownRef = useRef(false);
   const myStatus = activeMatch ? "in_game" : "online";
 
+  const isFdAdmin = enteredLobby && isReservedFdName(nickname) && isFdAuthenticated;
+  const typingFdName = isReservedFdName(nickname);
+  const isMyBanned = Boolean(bannedUsers && bannedUsers[myId]);
+
   const upsertKnownPlayer = useCallback((playerRecord) => {
     if (!playerRecord || !playerRecord.id) return;
     setKnownPlayers((prev) => {
@@ -504,6 +560,7 @@ export default function App() {
     if (!matchKey || awardedMatchIdRef.current === matchKey) return;
     awardedMatchIdRef.current = matchKey;
     const nowTs = Date.now();
+    const displayName = isReservedFdName(nickname) ? "FD" : nickname.trim();
     setMyWins((prev) => {
       const next = prev + 1;
       if (typeof window !== "undefined") {
@@ -511,7 +568,7 @@ export default function App() {
       }
       upsertKnownPlayer({
         id: myId,
-        name: nickname.trim() || "Oyuncu",
+        name: displayName,
         wins: next,
         lastSeenAt: nowTs,
       });
@@ -523,7 +580,7 @@ export default function App() {
         });
         set(ref(dbRef.current, `players_history/${myId}`), {
           id: myId,
-          name: nickname.trim() || "Oyuncu",
+          name: displayName,
           wins: next,
           lastSeenAt: nowTs,
         });
@@ -576,7 +633,8 @@ export default function App() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("duello_nickname", nickname);
     window.localStorage.setItem("duello_entered_lobby", enteredLobby ? "1" : "0");
-  }, [nickname, enteredLobby]);
+    window.localStorage.setItem("duello_fd_authed", isFdAuthenticated ? "1" : "0");
+  }, [nickname, enteredLobby, isFdAuthenticated]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -597,9 +655,109 @@ export default function App() {
     }
   }, []);
 
+  // Admin şifre kaydı ve ban listesi dinleme (giriş ekranında bile aktif)
+  useEffect(() => {
+    if (!dbRef.current) return;
+    const unsubAdmin = onValue(ref(dbRef.current, "admin_config/fd"), (snap) => {
+      const val = snap.val();
+      if (val && val.passwordHash) {
+        setStoredFdAuth(val);
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("duello_fd_auth", JSON.stringify(val));
+        }
+      }
+    });
+
+    const unsubBans = onValue(ref(dbRef.current, "banned_users"), (snap) => {
+      const val = snap.val() || {};
+      setBannedUsers(val);
+    });
+
+    return () => {
+      unsubAdmin();
+      unsubBans();
+    };
+  }, []);
+
+  // Kullanıcı banlandıysa anında lobi/oyundan çıkar
+  useEffect(() => {
+    if (!isMyBanned || isFdAdmin) return;
+    clearAllGameTimers();
+    if (dbRef.current) {
+      remove(ref(dbRef.current, `users/${myId}`));
+    }
+    setActiveMatch(null);
+    setEnteredLobby(false);
+    setLoginError("Yönetici (FD) tarafından siteden uzaklaştırıldınız.");
+  }, [isMyBanned, isFdAdmin, myId]);
+
+  function handleJoinLobby(e) {
+    if (e) e.preventDefault();
+    setLoginError("");
+    const trimmed = nickname.trim();
+
+    if (!trimmed) {
+      setLoginError("Takma ad boş bırakılamaz. Lütfen bir takma ad girin.");
+      return;
+    }
+
+    if (isMyBanned && !isReservedFdName(trimmed)) {
+      setLoginError("Bu hesap yönetici tarafından engellenmiştir.");
+      return;
+    }
+
+    if (isReservedFdName(trimmed)) {
+      const pass = fdPasswordInput.trim();
+      if (pass.length < 4) {
+        setLoginError("FD hesabı için en az 4 karakterli şifre girin.");
+        return;
+      }
+
+      const incomingHash = hashSecret(pass);
+
+      if (!storedFdAuth || !storedFdAuth.passwordHash) {
+        if (fdPasswordConfirm.trim() !== pass) {
+          setLoginError("FD şifre tekrarı eşleşmiyor.");
+          return;
+        }
+        const authRecord = {
+          passwordHash: incomingHash,
+          ownerId: myId,
+          createdAt: Date.now(),
+        };
+        setStoredFdAuth(authRecord);
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("duello_fd_auth", JSON.stringify(authRecord));
+        }
+        if (dbRef.current) {
+          set(ref(dbRef.current, "admin_config/fd"), authRecord);
+        }
+        setNickname("FD");
+        setIsFdAuthenticated(true);
+        setEnteredLobby(true);
+        return;
+      }
+
+      if (incomingHash !== storedFdAuth.passwordHash) {
+        setLoginError("FD takma adı korumalıdır. Girdiğiniz şifre hatalı!");
+        return;
+      }
+
+      setNickname("FD");
+      setIsFdAuthenticated(true);
+      setEnteredLobby(true);
+      return;
+    }
+
+    setIsFdAuthenticated(false);
+    setNickname(trimmed);
+    setEnteredLobby(true);
+  }
+
   useEffect(() => {
     if (!enteredLobby) return;
-    const cleanName = nickname.trim() || "Oyuncu";
+    const cleanName = isReservedFdName(nickname) ? "FD" : nickname.trim();
+    if (!cleanName) return;
     const nowTs = Date.now();
 
     upsertKnownPlayer({
@@ -618,6 +776,7 @@ export default function App() {
         name: cleanName,
         status: myStatus,
         wins: myWins,
+        isAdmin: isFdAdmin,
         lastSeenAt: nowTs,
         updatedAt: nowTs,
       });
@@ -657,6 +816,14 @@ export default function App() {
           });
       });
 
+      const unsubReports = onValue(ref(dbRef.current, "reports"), (snap) => {
+        const val = snap.val() || {};
+        const arr = Object.entries(val)
+          .map(([key, item]) => ({ id: key, ...item }))
+          .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+        setReportsList(arr);
+      });
+
       const unsubInvite = onValue(ref(dbRef.current, `invites/${myId}`), (snap) => {
         const val = snap.val();
         if (val && val.status === "pending") setIncomingInvite(val);
@@ -672,9 +839,11 @@ export default function App() {
             remove(ref(dbRef.current, `chats/global/${key}`));
           }
         }
-        const arr = validEntries.map(([, m]) => m).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        const arr = validEntries
+          .map(([fbKey, m]) => ({ ...m, fbKey }))
+          .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        setGlobalMessages(arr.slice(-50));
         if (arr.length > 0) {
-          setGlobalMessages(arr.slice(-50));
           const last = arr[arr.length - 1];
           if (last && last.senderId !== myId && !globalChatOpen) {
             setGlobalUnread((c) => c + 1);
@@ -685,6 +854,7 @@ export default function App() {
       return () => {
         unsubUsers();
         unsubHistory();
+        unsubReports();
         unsubInvite();
         unsubGlobal();
       };
@@ -695,7 +865,7 @@ export default function App() {
         { id: "demo_eda", name: "Eda", status: "in_game", wins: 6, lastSeenAt: Date.now() - 1000 * 60 * 9 },
       ]);
     }
-  }, [enteredLobby, nickname, myId, myStatus, myWins, globalChatOpen, upsertKnownPlayer]);
+  }, [enteredLobby, nickname, myId, myStatus, myWins, isFdAdmin, globalChatOpen, upsertKnownPlayer]);
 
   useEffect(() => {
     if (!dbRef.current || !enteredLobby || users.length === 0) return;
@@ -1170,7 +1340,7 @@ export default function App() {
     const gameMeta = GAMES_META.find((g) => g.id === gameId) || GAMES_META[1];
     const invitePayload = {
       fromId: myId,
-      fromName: nickname.trim() || "Oyuncu",
+      fromName: nickname.trim(),
       toId: targetUser.id,
       toName: targetUser.name,
       gameId: gameMeta.id,
@@ -1240,13 +1410,81 @@ export default function App() {
     const msg = {
       id: "g_" + Date.now() + "_" + Math.random().toString(36).slice(2, 5),
       senderId: myId,
-      senderName: nickname.trim() || "Oyuncu",
+      senderName: nickname.trim(),
       text,
       ts: Date.now(),
     };
     setGlobalInput("");
     if (dbRef.current) push(ref(dbRef.current, "chats/global"), msg);
     else setGlobalMessages((prev) => [...prev.slice(-49), msg]);
+  }
+
+  function handleDeleteGlobalMessage(msg) {
+    if (!isFdAdmin || !msg) return;
+    setGlobalMessages((prev) => prev.filter((item) => item.id !== msg.id && item.fbKey !== msg.fbKey));
+    if (dbRef.current && msg.fbKey) {
+      remove(ref(dbRef.current, `chats/global/${msg.fbKey}`));
+    }
+  }
+
+  function handleSubmitReport(e) {
+    e.preventDefault();
+    if (!reportTargetUser) return;
+    const reasonText = reportReason.trim() || "Uygunsuz davranış / sohbet";
+    const reportEntry = {
+      targetId: reportTargetUser.id,
+      targetName: reportTargetUser.name,
+      reporterId: myId,
+      reporterName: nickname.trim(),
+      reason: reasonText,
+      ts: Date.now(),
+    };
+    if (dbRef.current) {
+      push(ref(dbRef.current, "reports"), reportEntry);
+    } else {
+      setReportsList((prev) => [{ id: "rep_" + Date.now(), ...reportEntry }, ...prev]);
+    }
+    setReportTargetUser(null);
+    setReportReason("");
+    showNotice("Şikayet İletildi", `${reportTargetUser.name} hakkındaki şikayet FD yönetimine iletildi.`);
+  }
+
+  function handleKickAndBanUser(targetUser, reportIdToClear = null) {
+    if (!isFdAdmin || !targetUser || !targetUser.id || targetUser.id === myId) return;
+    const banPayload = {
+      id: targetUser.id,
+      name: targetUser.name || "Oyuncu",
+      bannedBy: "FD",
+      bannedAt: Date.now(),
+    };
+
+    setUsers((prev) => prev.filter((u) => u.id !== targetUser.id));
+    setBannedUsers((prev) => ({ ...prev, [targetUser.id]: banPayload }));
+
+    if (dbRef.current) {
+      set(ref(dbRef.current, `banned_users/${targetUser.id}`), banPayload);
+      remove(ref(dbRef.current, `users/${targetUser.id}`));
+      remove(ref(dbRef.current, `invites/${targetUser.id}`));
+      if (reportIdToClear) {
+        remove(ref(dbRef.current, `reports/${reportIdToClear}`));
+      }
+    }
+    if (reportIdToClear) {
+      setReportsList((prev) => prev.filter((r) => r.id !== reportIdToClear));
+    }
+    showNotice("Kullanıcı Atıldı", `${targetUser.name} siteden uzaklaştırıldı ve engellendi.`);
+  }
+
+  function handleUnbanUser(userId) {
+    if (!isFdAdmin || !userId) return;
+    setBannedUsers((prev) => {
+      const next = { ...prev };
+      delete next[userId];
+      return next;
+    });
+    if (dbRef.current) {
+      remove(ref(dbRef.current, `banned_users/${userId}`));
+    }
   }
 
   function openDirectMessage(peer) {
@@ -1263,7 +1501,7 @@ export default function App() {
     const msg = {
       id: "dm_" + Date.now(),
       senderId: myId,
-      senderName: nickname.trim() || "Oyuncu",
+      senderName: nickname.trim(),
       text,
       ts: Date.now(),
     };
@@ -1285,7 +1523,7 @@ export default function App() {
     const msg = {
       id: "mc_" + Date.now() + "_" + Math.random().toString(36).slice(2, 5),
       senderId: myId,
-      senderName: nickname.trim() || "Sen",
+      senderName: nickname.trim(),
       text,
       ts: Date.now(),
     };
@@ -1313,7 +1551,7 @@ export default function App() {
   }
 
   function handleSendEmojiReaction(emoji) {
-    const reaction = { emoji, fromName: nickname.trim() || "Sen", ts: Date.now() };
+    const reaction = { emoji, fromName: nickname.trim(), ts: Date.now() };
     setFloatingReaction(reaction);
     if (dbRef.current && activeMatch && !activeMatch.isBot) {
       update(ref(dbRef.current, `matches/${activeMatch.roomId}`), { reaction });
@@ -1770,7 +2008,7 @@ export default function App() {
   }, [users, enteredLobby, myId]);
 
   const combinedPlayersForLists = useMemo(() => {
-    const cleanName = nickname.trim() || "Oyuncu";
+    const cleanName = isReservedFdName(nickname) ? "FD" : nickname.trim();
     const map = new Map();
 
     INITIAL_KNOWN_PLAYERS.forEach((p) => {
@@ -1800,7 +2038,7 @@ export default function App() {
       });
     });
 
-    if (enteredLobby) {
+    if (enteredLobby && cleanName) {
       const prevMe = map.get(myId);
       map.set(myId, {
         id: myId,
@@ -1830,6 +2068,8 @@ export default function App() {
   }, [combinedPlayersForLists]);
 
   if (!enteredLobby) {
+    const needsFirstTimeFdSetup = typingFdName && (!storedFdAuth || !storedFdAuth.passwordHash);
+
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-5 select-none">
         <div className="max-w-md w-full mx-auto my-auto space-y-6">
@@ -1843,26 +2083,75 @@ export default function App() {
             </p>
           </div>
 
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Takma Adın
-            </label>
-            <input
-              type="text"
-              maxLength={18}
-              value={nickname}
-              onChange={(e) => setNickname(e.target.value)}
-              placeholder="Örn: Emirhan"
-              className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-base"
-            />
+          <form
+            onSubmit={handleJoinLobby}
+            className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl"
+          >
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Takma Adın
+              </label>
+              <input
+                type="text"
+                maxLength={18}
+                value={nickname}
+                onChange={(e) => {
+                  setNickname(e.target.value);
+                  if (loginError) setLoginError("");
+                }}
+                placeholder="Örn: Emirhan"
+                className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-base"
+              />
+            </div>
+
+            {typingFdName && (
+              <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/40 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+                  <Lock className="w-4 h-4" />
+                  {needsFirstTimeFdSetup
+                    ? "FD Yönetici Şifresi Oluştur"
+                    : "FD Korumalı Yönetici Girişi"}
+                </div>
+                <input
+                  type="password"
+                  value={fdPasswordInput}
+                  onChange={(e) => {
+                    setFdPasswordInput(e.target.value);
+                    if (loginError) setLoginError("");
+                  }}
+                  placeholder={needsFirstTimeFdSetup ? "Yeni FD şifresi belirleyin" : "FD şifrenizi girin"}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 text-sm"
+                />
+                {needsFirstTimeFdSetup && (
+                  <input
+                    type="password"
+                    value={fdPasswordConfirm}
+                    onChange={(e) => {
+                      setFdPasswordConfirm(e.target.value);
+                      if (loginError) setLoginError("");
+                    }}
+                    placeholder="FD şifresini tekrar girin"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 text-sm"
+                  />
+                )}
+              </div>
+            )}
+
+            {loginError && (
+              <p className="text-xs font-semibold text-rose-400 bg-rose-950/50 border border-rose-500/40 rounded-xl px-3 py-2">
+                {loginError}
+              </p>
+            )}
+
             <button
-              onClick={() => setEnteredLobby(true)}
-              className="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-[0.99] transition font-bold text-white flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25"
+              type="submit"
+              disabled={!nickname.trim()}
+              className="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-45 disabled:cursor-not-allowed active:scale-[0.99] transition font-bold text-white flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25"
             >
               <Sparkles className="w-4 h-4" />
               Lobiye Katıl
             </button>
-          </div>
+          </form>
 
           <div className="grid grid-cols-3 gap-2 text-center text-xs text-slate-400">
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
@@ -1918,7 +2207,7 @@ export default function App() {
               )}
             </div>
             <p className="text-sm font-semibold text-white">
-              {nickname.trim() || "Sen"} vs {activeMatch.opponent.name}
+              {nickname.trim()} vs {activeMatch.opponent.name}
             </p>
           </div>
 
@@ -2542,6 +2831,8 @@ export default function App() {
     );
   }
 
+  const bannedEntries = Object.values(bannedUsers || {});
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-12">
       <header className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between">
@@ -2550,17 +2841,31 @@ export default function App() {
             <Gamepad2 className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-base font-extrabold leading-tight text-white">Düello Arenası</h1>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-base font-extrabold leading-tight text-white">Düello Arenası</h1>
+              {isFdAdmin && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300 font-bold flex items-center gap-1">
+                  <Shield className="w-3 h-3" />
+                  Yönetici
+                </span>
+              )}
+            </div>
             <p className="text-xs text-emerald-400">
-              ● {nickname.trim() || "Oyuncu"} • {myWins} Puan
+              ● {nickname.trim()} • {myWins} Puan
             </p>
           </div>
         </div>
         <button
           onClick={() => {
+            if (dbRef.current) {
+              remove(ref(dbRef.current, `users/${myId}`));
+            }
             setEnteredLobby(false);
+            setIsFdAuthenticated(false);
+            setFdPasswordInput("");
             if (typeof window !== "undefined") {
               window.localStorage.setItem("duello_entered_lobby", "0");
+              window.localStorage.setItem("duello_fd_authed", "0");
             }
           }}
           className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300"
@@ -2585,6 +2890,89 @@ export default function App() {
               <X className="w-4 h-4" />
             </button>
           </div>
+        )}
+
+        {/* FD Yönetici Moderasyon Paneli */}
+        {isFdAdmin && (
+          <section className="bg-amber-950/35 border border-amber-500/40 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold text-amber-300 flex items-center gap-2">
+                <Shield className="w-4 h-4" />
+                FD Yönetici Moderasyonu
+              </h2>
+              <span className="text-[11px] text-amber-200/80">
+                Şikayetler ({reportsList.length}) • Engelli ({bannedEntries.length})
+              </span>
+            </div>
+
+            {reportsList.length > 0 ? (
+              <div className="space-y-2">
+                <div className="text-[11px] font-semibold text-amber-200">Gelen Şikayetler:</div>
+                {reportsList.map((rep) => (
+                  <div
+                    key={rep.id}
+                    className="p-2.5 rounded-xl bg-slate-950/80 border border-amber-500/30 flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-bold text-white truncate">
+                        {rep.targetName}{" "}
+                        <span className="text-[10px] font-normal text-slate-400">
+                          (Bildiren: {rep.reporterName})
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-amber-200/90 truncate">{rep.reason}</div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() =>
+                          handleKickAndBanUser({ id: rep.targetId, name: rep.targetName }, rep.id)
+                        }
+                        className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] flex items-center gap-1"
+                      >
+                        <Ban className="w-3 h-3" />
+                        At
+                      </button>
+                      <button
+                        onClick={() => {
+                          setReportsList((prev) => prev.filter((x) => x.id !== rep.id));
+                          if (dbRef.current) remove(ref(dbRef.current, `reports/${rep.id}`));
+                        }}
+                        className="p-1.5 rounded-lg bg-slate-800 text-slate-300"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">
+                Bekleyen şikayet yok. Aktif oyunculardan herhangi birini doğrudan atabilir veya lobi sohbetindeki uygunsuz mesajları silebilirsin.
+              </p>
+            )}
+
+            {bannedEntries.length > 0 && (
+              <div className="pt-1 border-t border-amber-500/20 space-y-1.5">
+                <div className="text-[11px] font-semibold text-slate-300">Siteden Atılanlar:</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {bannedEntries.map((b) => (
+                    <span
+                      key={b.id}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-950/70 border border-rose-500/40 text-[11px] text-rose-200"
+                    >
+                      {b.name}
+                      <button
+                        onClick={() => handleUnbanUser(b.id)}
+                        className="text-rose-300 hover:text-white underline text-[10px]"
+                      >
+                        Kaldır
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
         )}
 
         {incomingInvite && (
@@ -2743,6 +3131,29 @@ export default function App() {
                         )}
                       </button>
 
+                      {isFdAdmin ? (
+                        <button
+                          onClick={() => handleKickAndBanUser(u)}
+                          title="Siteden At"
+                          className="p-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/35 border border-rose-500/40 text-rose-300"
+                        >
+                          <Ban className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        !isReservedFdName(u.name) && (
+                          <button
+                            onClick={() => {
+                              setReportTargetUser(u);
+                              setReportReason("");
+                            }}
+                            title="Şikayet Et"
+                            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300"
+                          >
+                            <Flag className="w-4 h-4" />
+                          </button>
+                        )
+                      )}
+
                       <button
                         disabled={isBusy}
                         onClick={() => {
@@ -2864,17 +3275,32 @@ export default function App() {
           {globalChatOpen && (
             <>
               <div className="h-44 overflow-y-auto space-y-2 pr-1 bg-slate-950/60 rounded-xl p-2.5 border border-slate-800/70">
-                {visibleGlobalMessages.map((m) => {
-                  const mine = m.senderId === myId;
-                  return (
-                    <div key={m.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
-                      <span className="text-[10px] text-slate-400 mb-0.5">{m.senderName}</span>
-                      <div className={`px-3 py-1.5 rounded-2xl text-xs max-w-[82%] ${mine ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-100"}`}>
-                        {m.text}
+                {visibleGlobalMessages.length === 0 ? (
+                  <p className="text-center text-xs text-slate-500 pt-14">Henüz mesaj yok.</p>
+                ) : (
+                  visibleGlobalMessages.map((m) => {
+                    const mine = m.senderId === myId;
+                    return (
+                      <div key={m.id || m.fbKey} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className="text-[10px] text-slate-400">{m.senderName}</span>
+                          {isFdAdmin && m.senderId !== "sys" && (
+                            <button
+                              onClick={() => handleDeleteGlobalMessage(m)}
+                              title="Mesajı Sil"
+                              className="text-rose-400 hover:text-rose-300 p-0.5"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                        <div className={`px-3 py-1.5 rounded-2xl text-xs max-w-[82%] ${mine ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-100"}`}>
+                          {m.text}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
 
               <form onSubmit={handleSendGlobalMessage} className="flex gap-2">
@@ -2893,6 +3319,44 @@ export default function App() {
           )}
         </section>
       </main>
+
+      {reportTargetUser && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <form
+            onSubmit={handleSubmitReport}
+            className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-extrabold text-white">{reportTargetUser.name} kişisini şikayet et</h3>
+                <p className="text-xs text-slate-400">Şikayet FD yönetici paneline düşecektir</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReportTargetUser(null)}
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <input
+              type="text"
+              value={reportReason}
+              onChange={(e) => setReportReason(e.target.value)}
+              placeholder="Şikayet sebebi (örn: küfür / uygunsuz mesaj)..."
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-amber-500"
+            />
+
+            <button
+              type="submit"
+              className="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-500 font-bold text-sm text-white"
+            >
+              Şikayeti Gönder
+            </button>
+          </form>
+        </div>
+      )}
 
       {selectedTargetUser && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
