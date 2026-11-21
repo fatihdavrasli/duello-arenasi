@@ -31,6 +31,7 @@ import {
   ChevronDown,
   ChevronUp,
   Bell,
+  Clock,
 } from "lucide-react";
 
 const FIREBASE_CONFIG =
@@ -105,8 +106,28 @@ const SUDOKU_PUZZLES = [
   },
 ];
 
+const INITIAL_KNOWN_PLAYERS = [
+  { id: "seed_1", name: "Zeynep", wins: 4, lastSeenAt: Date.now() - 1000 * 60 * 18 },
+  { id: "seed_2", name: "Mert", wins: 2, lastSeenAt: Date.now() - 1000 * 60 * 42 },
+  { id: "seed_3", name: "Eda", wins: 6, lastSeenAt: Date.now() - 1000 * 60 * 9 },
+  { id: "seed_4", name: "Kaan", wins: 3, lastSeenAt: Date.now() - 1000 * 60 * 75 },
+  { id: "seed_5", name: "Selin", wins: 1, lastSeenAt: Date.now() - 1000 * 60 * 120 },
+];
+
 const QUICK_REPLIES = ["İyi hamle! 👏", "Şanslıydın 😄", "Çok yakındı! 🔥", "Rövanş? 🔄"];
 const EMOJIS = ["👏", "😂", "🔥", "😱", "🤔", "👑"];
+
+function formatRelativeTime(ts) {
+  const numericTs = Number(ts || 0);
+  if (!numericTs) return "Az önce";
+  const diffSec = Math.max(0, Math.floor((Date.now() - numericTs) / 1000));
+  if (diffSec < 60) return "Az önce";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} dk önce`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} sa önce`;
+  return `${Math.floor(diffHr / 24)} gün önce`;
+}
 
 function normalizeTrChar(ch) {
   if (!ch) return "";
@@ -212,7 +233,6 @@ function checkTTTWinner(board) {
   return null;
 }
 
-// green: doğru harf doğru yerde | orange: harf var ama farklı yerde | red: harfte yok
 function evaluateWordleGuess(guess, target) {
   const res = Array(5).fill("red");
   const targetArr = Array.from(target);
@@ -309,6 +329,18 @@ export default function App() {
     if (typeof window === "undefined") return 0;
     const raw = Number(window.localStorage.getItem("duello_my_wins") || "0");
     return Number.isFinite(raw) && raw >= 0 ? raw : 0;
+  });
+
+  const [knownPlayers, setKnownPlayers] = useState(() => {
+    if (typeof window === "undefined") return INITIAL_KNOWN_PLAYERS;
+    try {
+      const raw = window.localStorage.getItem("duello_known_players");
+      if (!raw) return INITIAL_KNOWN_PLAYERS;
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_KNOWN_PLAYERS;
+    } catch {
+      return INITIAL_KNOWN_PLAYERS;
+    }
   });
 
   const [users, setUsers] = useState([]);
@@ -414,6 +446,33 @@ export default function App() {
   const leftNoticeShownRef = useRef(false);
   const myStatus = activeMatch ? "in_game" : "online";
 
+  const upsertKnownPlayer = useCallback((playerRecord) => {
+    if (!playerRecord || !playerRecord.id) return;
+    setKnownPlayers((prev) => {
+      const existing = prev.find((p) => p.id === playerRecord.id);
+      const nextWins =
+        typeof playerRecord.wins === "number"
+          ? Math.max(existing?.wins || 0, playerRecord.wins)
+          : existing?.wins || 0;
+      const nextSeen = Math.max(
+        Number(existing?.lastSeenAt || 0),
+        Number(playerRecord.lastSeenAt || 0)
+      );
+      const mergedItem = {
+        id: playerRecord.id,
+        name: playerRecord.name || existing?.name || "Oyuncu",
+        wins: nextWins,
+        lastSeenAt: nextSeen || Date.now(),
+      };
+      const filtered = prev.filter((p) => p.id !== playerRecord.id);
+      const nextList = [mergedItem, ...filtered].slice(0, 50);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("duello_known_players", JSON.stringify(nextList));
+      }
+      return nextList;
+    });
+  }, []);
+
   function clearAllGameTimers() {
     if (rpsTimerRef.current) {
       clearTimeout(rpsTimerRef.current);
@@ -444,13 +503,30 @@ export default function App() {
   function awardWinPoint(matchKey) {
     if (!matchKey || awardedMatchIdRef.current === matchKey) return;
     awardedMatchIdRef.current = matchKey;
+    const nowTs = Date.now();
     setMyWins((prev) => {
       const next = prev + 1;
       if (typeof window !== "undefined") {
         window.localStorage.setItem("duello_my_wins", String(next));
       }
+      upsertKnownPlayer({
+        id: myId,
+        name: nickname.trim() || "Oyuncu",
+        wins: next,
+        lastSeenAt: nowTs,
+      });
       if (dbRef.current) {
-        update(ref(dbRef.current, `users/${myId}`), { wins: next });
+        update(ref(dbRef.current, `users/${myId}`), {
+          wins: next,
+          lastSeenAt: nowTs,
+          updatedAt: nowTs,
+        });
+        set(ref(dbRef.current, `players_history/${myId}`), {
+          id: myId,
+          name: nickname.trim() || "Oyuncu",
+          wins: next,
+          lastSeenAt: nowTs,
+        });
       }
       return next;
     });
@@ -524,21 +600,61 @@ export default function App() {
   useEffect(() => {
     if (!enteredLobby) return;
     const cleanName = nickname.trim() || "Oyuncu";
+    const nowTs = Date.now();
+
+    upsertKnownPlayer({
+      id: myId,
+      name: cleanName,
+      wins: myWins,
+      lastSeenAt: nowTs,
+    });
 
     if (dbRef.current) {
       const userRef = ref(dbRef.current, `users/${myId}`);
+      const historyRef = ref(dbRef.current, `players_history/${myId}`);
+
       set(userRef, {
         id: myId,
         name: cleanName,
         status: myStatus,
         wins: myWins,
-        updatedAt: Date.now(),
+        lastSeenAt: nowTs,
+        updatedAt: nowTs,
+      });
+      set(historyRef, {
+        id: myId,
+        name: cleanName,
+        wins: myWins,
+        lastSeenAt: nowTs,
       });
       onDisconnect(userRef).remove();
 
       const unsubUsers = onValue(ref(dbRef.current, "users"), (snap) => {
         const val = snap.val() || {};
-        setUsers(Object.values(val).filter((u) => u && u.id !== myId));
+        const allList = Object.values(val).filter(Boolean);
+        setUsers(allList.filter((u) => u.id !== myId));
+        allList.forEach((u) => {
+          upsertKnownPlayer({
+            id: u.id,
+            name: u.name,
+            wins: Number(u.wins || 0),
+            lastSeenAt: Number(u.lastSeenAt || u.updatedAt || Date.now()),
+          });
+        });
+      });
+
+      const unsubHistory = onValue(ref(dbRef.current, "players_history"), (snap) => {
+        const val = snap.val() || {};
+        Object.values(val)
+          .filter(Boolean)
+          .forEach((p) => {
+            upsertKnownPlayer({
+              id: p.id,
+              name: p.name,
+              wins: Number(p.wins || 0),
+              lastSeenAt: Number(p.lastSeenAt || 0),
+            });
+          });
       });
 
       const unsubInvite = onValue(ref(dbRef.current, `invites/${myId}`), (snap) => {
@@ -568,17 +684,18 @@ export default function App() {
 
       return () => {
         unsubUsers();
+        unsubHistory();
         unsubInvite();
         unsubGlobal();
       };
     } else {
       setUsers([
-        { id: "demo_alice", name: "Zeynep", status: "online", wins: 4 },
-        { id: "demo_mert", name: "Mert", status: "online", wins: 2 },
-        { id: "demo_eda", name: "Eda", status: "in_game", wins: 6 },
+        { id: "seed_1", name: "Zeynep", status: "online", wins: 4, lastSeenAt: Date.now() - 1000 * 60 * 18 },
+        { id: "demo_mert", name: "Mert", status: "online", wins: 2, lastSeenAt: Date.now() - 1000 * 60 * 42 },
+        { id: "demo_eda", name: "Eda", status: "in_game", wins: 6, lastSeenAt: Date.now() - 1000 * 60 * 9 },
       ]);
     }
-  }, [enteredLobby, nickname, myId, myStatus, myWins, globalChatOpen]);
+  }, [enteredLobby, nickname, myId, myStatus, myWins, globalChatOpen, upsertKnownPlayer]);
 
   useEffect(() => {
     if (!dbRef.current || !enteredLobby || users.length === 0) return;
@@ -1646,24 +1763,71 @@ export default function App() {
     return globalMessages.filter((m) => m.senderId === "sys" || isWithinOneHour(m.ts, nowMs));
   }, [globalMessages]);
 
-  const leaderboardList = useMemo(() => {
+  const onlineIdSet = useMemo(() => {
+    const s = new Set(users.map((u) => u.id));
+    if (enteredLobby) s.add(myId);
+    return s;
+  }, [users, enteredLobby, myId]);
+
+  const combinedPlayersForLists = useMemo(() => {
     const cleanName = nickname.trim() || "Oyuncu";
-    const meEntry = {
-      id: myId,
-      name: cleanName,
-      wins: myWins,
-      status: myStatus,
-      isMe: true,
-    };
-    const others = users.map((u) => ({
-      id: u.id,
-      name: u.name || "Oyuncu",
-      wins: Number(u.wins || 0),
-      status: u.status || "online",
-      isMe: false,
+    const map = new Map();
+
+    INITIAL_KNOWN_PLAYERS.forEach((p) => {
+      map.set(p.id, { ...p });
+    });
+
+    knownPlayers.forEach((p) => {
+      const prev = map.get(p.id);
+      map.set(p.id, {
+        id: p.id,
+        name: p.name || prev?.name || "Oyuncu",
+        wins: Math.max(Number(prev?.wins || 0), Number(p.wins || 0)),
+        lastSeenAt: Math.max(Number(prev?.lastSeenAt || 0), Number(p.lastSeenAt || 0)),
+      });
+    });
+
+    users.forEach((u) => {
+      const prev = map.get(u.id);
+      map.set(u.id, {
+        id: u.id,
+        name: u.name || prev?.name || "Oyuncu",
+        wins: Math.max(Number(prev?.wins || 0), Number(u.wins || 0)),
+        lastSeenAt: Math.max(
+          Number(prev?.lastSeenAt || 0),
+          Number(u.lastSeenAt || u.updatedAt || Date.now())
+        ),
+      });
+    });
+
+    if (enteredLobby) {
+      const prevMe = map.get(myId);
+      map.set(myId, {
+        id: myId,
+        name: cleanName,
+        wins: Math.max(Number(prevMe?.wins || 0), Number(myWins || 0)),
+        lastSeenAt: Math.max(Number(prevMe?.lastSeenAt || 0), Date.now()),
+      });
+    }
+
+    return Array.from(map.values()).map((p) => ({
+      ...p,
+      isOnline: onlineIdSet.has(p.id),
+      isMe: p.id === myId,
     }));
-    return [meEntry, ...others].sort((a, b) => b.wins - a.wins);
-  }, [nickname, myId, myWins, myStatus, users]);
+  }, [knownPlayers, users, enteredLobby, myId, nickname, myWins, onlineIdSet]);
+
+  const topFiveWinners = useMemo(() => {
+    return [...combinedPlayersForLists]
+      .sort((a, b) => b.wins - a.wins || b.lastSeenAt - a.lastSeenAt)
+      .slice(0, 5);
+  }, [combinedPlayersForLists]);
+
+  const lastFiveOnlinePlayers = useMemo(() => {
+    return [...combinedPlayersForLists]
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt || b.wins - a.wins)
+      .slice(0, 5);
+  }, [combinedPlayersForLists]);
 
   if (!enteredLobby) {
     return (
@@ -1710,8 +1874,8 @@ export default function App() {
               <div>Otomatik temizlenir</div>
             </div>
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
-              <div className="font-semibold text-slate-200">Liderlik</div>
-              <div>Her galibiyet +1 puan</div>
+              <div className="font-semibold text-slate-200">İlk 5 Listeler</div>
+              <div>Puan & Son Online</div>
             </div>
           </div>
         </div>
@@ -2598,19 +2762,20 @@ export default function App() {
           )}
         </section>
 
+        {/* En Çok Puan Toplayan İlk 5 Kişi (Online olmasalar bile görünür) */}
         <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
               <Trophy className="w-4 h-4 text-amber-400" />
-              En Çok Kazananlar
+              En Çok Kazananlar (İlk 5)
             </h2>
-            <span className="text-[11px] text-slate-400">Galibiyet = +1 Puan</span>
+            <span className="text-[11px] text-slate-400">Online olmasalar bile görünür</span>
           </div>
 
           <div className="space-y-1.5">
-            {leaderboardList.slice(0, 5).map((entry, idx) => (
+            {topFiveWinners.map((entry, idx) => (
               <div
-                key={entry.id}
+                key={`top-${entry.id}`}
                 className={`px-3 py-2 rounded-xl border flex items-center justify-between text-xs ${
                   entry.isMe
                     ? "bg-indigo-950/50 border-indigo-500/40 text-white"
@@ -2621,11 +2786,52 @@ export default function App() {
                   <span className="w-5 h-5 rounded-full bg-slate-800 text-amber-300 font-extrabold text-[11px] flex items-center justify-center shrink-0">
                     {idx + 1}
                   </span>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${entry.isOnline ? "bg-emerald-400" : "bg-slate-600"}`} />
+                  <span className="font-semibold truncate">
+                    {entry.name} {entry.isMe ? "(Sen)" : ""}
+                  </span>
+                  <span className="text-[10px] text-slate-500 shrink-0">
+                    {entry.isOnline ? "Online" : "Çevrimdışı"}
+                  </span>
+                </div>
+                <span className="font-extrabold text-amber-300 shrink-0">{entry.wins} Puan</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* En Son Online Olan 5 Kişi (Online olmasalar bile görünür) */}
+        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <Clock className="w-4 h-4 text-sky-400" />
+              En Son Online Olanlar (İlk 5)
+            </h2>
+            <span className="text-[11px] text-slate-400">Online olmasalar bile görünür</span>
+          </div>
+
+          <div className="space-y-1.5">
+            {lastFiveOnlinePlayers.map((entry, idx) => (
+              <div
+                key={`recent-${entry.id}`}
+                className={`px-3 py-2 rounded-xl border flex items-center justify-between text-xs ${
+                  entry.isMe
+                    ? "bg-indigo-950/50 border-indigo-500/40 text-white"
+                    : "bg-slate-950/70 border-slate-800 text-slate-200"
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="w-5 h-5 rounded-full bg-slate-800 text-sky-300 font-extrabold text-[11px] flex items-center justify-center shrink-0">
+                    {idx + 1}
+                  </span>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${entry.isOnline ? "bg-emerald-400" : "bg-slate-600"}`} />
                   <span className="font-semibold truncate">
                     {entry.name} {entry.isMe ? "(Sen)" : ""}
                   </span>
                 </div>
-                <span className="font-extrabold text-amber-300 shrink-0">{entry.wins} Puan</span>
+                <span className="text-[11px] text-slate-400 shrink-0">
+                  {entry.isOnline ? "Şimdi Online" : formatRelativeTime(entry.lastSeenAt)}
+                </span>
               </div>
             ))}
           </div>
