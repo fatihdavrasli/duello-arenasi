@@ -37,6 +37,9 @@ import {
   Ban,
   Flag,
   Lock,
+  EyeOff,
+  Eye,
+  HelpCircle,
 } from "lucide-react";
 
 const FIREBASE_CONFIG =
@@ -47,11 +50,40 @@ const FIREBASE_CONFIG =
 const MESSAGE_TTL_MS = 60 * 60 * 1000; // 1 saat
 
 const GAMES_META = [
+  { id: "bluff", name: "Blöf", desc: "3+ kişilik kelime & blöf oyunu", badge: "3+ Kişi", icon: EyeOff },
   { id: "battleship", name: "Amiral Battı", desc: "6x6 hızlı deniz savaşı", badge: "Strateji", icon: Ship },
   { id: "rps", name: "Taş Kağıt Makas", desc: "5 turluk düello", badge: "5 Tur", icon: Swords },
   { id: "ttt", name: "Tic Tac Toe", desc: "3x3 sıra tabanlı XOX", badge: "Klasik", icon: Hash },
   { id: "wordle", name: "Kelime Bulma", desc: "5 harfli Türkçe kelime yarışı", badge: "Kelime", icon: Type },
   { id: "sudoku", name: "Sudoku", desc: "4x4 mini sudoku hız yarışı", badge: "Zeka", icon: Grid },
+];
+
+const BLUFF_WORD_BANK = [
+  { word: "Araba", clues: ["Tekerlek", "Direksiyon", "Yolculuk", "Motor", "Trafik", "Benzin"] },
+  { word: "Güneş", clues: ["Sıcak", "Yaz", "Gökyüzü", "Işık", "Sabah", "Sahil"] },
+  { word: "Karpuz", clues: ["Yaz", "Çekirdek", "Kırmızı", "Dilim", "Soğuk", "Bostan"] },
+  { word: "Doktor", clues: ["Hastane", "Stetoskop", "Muayene", "Reçete", "Sağlık", "Nöbet"] },
+  { word: "Uçak", clues: ["Bulut", "Kanat", "Havalimanı", "Pilot", "Bilet", "Gökyüzü"] },
+  { word: "Piyano", clues: ["Tuş", "Nota", "Konser", "Melodi", "Müzik", "Siyah Beyaz"] },
+  { word: "Şemsiye", clues: ["Yağmur", "Islak", "Bulut", "Sonbahar", "Rüzgar", "Açılır"] },
+  { word: "Pasta", clues: ["Doğum Günü", "Mum", "Krema", "Dilim", "Kutlama", "Tatlı"] },
+  { word: "Dağ", clues: ["Zirve", "Kar", "Tırmanış", "Bulut", "Yayla", "Yüksek"] },
+  { word: "Kedi", clues: ["Miyav", "Bıyık", "Pati", "Tüy", "Süt", "Mırıldanma"] },
+  { word: "Kalem", clues: ["Defter", "Yazı", "Silgi", "Uç", "Okul", "Çizgi"] },
+  { word: "Bilgisayar", clues: ["Klavye", "Ekran", "Fare", "İnternet", "Yazılım", "Masa"] },
+  { word: "Bisiklet", clues: ["Pedal", "Kask", "Zincir", "İki Teker", "Park", "Gidon"] },
+  { word: "Saat", clues: ["Zaman", "Akrep", "Yelkovan", "Bilek", "Dakika", "Alarm"] },
+  { word: "Kitap", clues: ["Sayfa", "Yazar", "Kütüphane", "Roman", "Kapak", "Okumak"] },
+  { word: "Futbol", clues: ["Kale", "Top", "Hakem", "Stadyum", "Gol", "Ofsayt"] },
+  { word: "Şapka", clues: ["Baş", "Güneş", "Bere", "Kasket", "Aksesuar", "Siper"] },
+  { word: "Ateş", clues: ["Duman", "Kıvılcım", "Kamp", "Sıcak", "Köz", "Alev"] },
+  { word: "Müzik", clues: ["Ritim", "Şarkı", "Kulaklık", "Melodi", "Enstrüman", "Ses"] },
+  { word: "Robot", clues: ["Yapay Zeka", "Metal", "Sensör", "Otomasyon", "Kod", "Gelecek"] },
+];
+
+const BLUFF_FAKE_CLUES = [
+  "Klasik", "Günlük", "Önemli", "Tanıdık", "Hareketli", "Evde", "Dışarıda",
+  "Renkli", "Hızlı", "Keyifli", "Sıradan", "Farklı", "Ortak", "Eski", "Yeni",
 ];
 
 const RPS_TOTAL_ROUNDS = 5;
@@ -121,6 +153,60 @@ const INITIAL_KNOWN_PLAYERS = [
 
 const QUICK_REPLIES = ["İyi hamle! 👏", "Şanslıydın 😄", "Çok yakındı! 🔥", "Rövanş? 🔄"];
 const EMOJIS = ["👏", "😂", "🔥", "😱", "🤔", "👑"];
+
+function pickRandomTenBluffWords() {
+  const shuffled = [...BLUFF_WORD_BANK].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, 10).map((item) => item.word);
+}
+
+function getBotClueForBluff(secretWord, isBluffer, existingClues = []) {
+  const usedLower = new Set(existingClues.map((c) => String(c.text || "").toLocaleLowerCase("tr")));
+  if (!isBluffer && secretWord) {
+    const entry = BLUFF_WORD_BANK.find(
+      (b) => b.word.toLocaleLowerCase("tr") === String(secretWord).toLocaleLowerCase("tr")
+    );
+    if (entry) {
+      const available = entry.clues.filter((c) => !usedLower.has(c.toLocaleLowerCase("tr")));
+      if (available.length > 0) {
+        return available[Math.floor(Math.random() * available.length)];
+      }
+    }
+  }
+  const fakePool = BLUFF_FAKE_CLUES.filter((c) => !usedLower.has(c.toLocaleLowerCase("tr")));
+  const pool = fakePool.length > 0 ? fakePool : BLUFF_FAKE_CLUES;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function createInitialBluffState(participants, roundNum = 1, prevScores = {}) {
+  const list = participants.map((p) => ({
+    id: p.id,
+    name: p.name,
+    isBot: Boolean(p.isBot),
+    score: Number(prevScores[p.id] ?? p.score ?? 0),
+  }));
+  const count = list.length;
+  const starterIndex = (roundNum - 1) % count;
+  const starterId = list[starterIndex].id;
+
+  // Blöf kartı her tur farklı kişiye gelsin; seçen oyuncu kelime kartı sahibi olur
+  const blufferOffset = 1 + ((roundNum - 1) % Math.max(1, count - 1));
+  const blufferIndex = (starterIndex + blufferOffset) % count;
+  const blufferId = list[blufferIndex].id;
+
+  return {
+    round: roundNum,
+    players: list,
+    starterId,
+    blufferId,
+    wordOptions: pickRandomTenBluffWords(),
+    secretWord: null,
+    phase: "selecting_word", // selecting_word | cluing | ask_vote | voting | round_result
+    clues: [], // { playerId, playerName, text, cycle, ts }
+    votePromptVotes: {}, // { [playerId]: 'yes' | 'no' }
+    guesses: {}, // { [playerId]: targetBlufferId }
+    roundSummary: null,
+  };
+}
 
 function isReservedFdName(rawName) {
   return String(rawName || "").trim().toLocaleUpperCase("tr") === "FD";
@@ -233,7 +319,8 @@ function countHitsOnGrid(shotsGrid) {
 
 function getBotChatReply(text, gameType) {
   const lower = (text || "").toLocaleLowerCase("tr");
-  if (lower.includes("rövanş") || lower.includes("tekrar")) return "Hemen bir rövanş daha atalım, hazırım! 🔥";
+  if (lower.includes("rövanş") || lower.includes("tekrar")) return "Hemen bir tur daha atalım, hazırım! 🔥";
+  if (lower.includes("blöf")) return "Bence çağrışımlara dikkat et, biri kesin uyduruyor 👀";
   if (lower.includes("şans") || lower.includes("nasıl")) return "Tamamen hesaplanmış strateji 😄";
   if (gameType === "battleship") return "Radarlarım açık, gemilerim sağlam! 🚢";
   if (gameType === "wordle") return "Harfleri iyi analiz et, 5 harf seni bekliyor! 🔤";
@@ -400,7 +487,7 @@ export default function App() {
   const [outgoingInvite, setOutgoingInvite] = useState(null);
   const [noticeBanner, setNoticeBanner] = useState(null);
   const [selectedTargetUser, setSelectedTargetUser] = useState(null);
-  const [selectedGameForInvite, setSelectedGameForInvite] = useState("rps");
+  const [selectedGameForInvite, setSelectedGameForInvite] = useState("bluff");
 
   const [globalChatOpen, setGlobalChatOpen] = useState(true);
   const [globalMessages, setGlobalMessages] = useState([
@@ -436,6 +523,11 @@ export default function App() {
       return null;
     }
   });
+
+  // Blöf state
+  const [bluffState, setBluffState] = useState(null);
+  const [bluffClueInput, setBluffClueInput] = useState("");
+  const [bluffSelectedSuspect, setBluffSelectedSuspect] = useState(null);
 
   // Amiral Battı state
   const [myShipGrid, setMyShipGrid] = useState(() => autoPlaceShips(6));
@@ -493,6 +585,7 @@ export default function App() {
   const botTttTimerRef = useRef(null);
   const botWordTimerRef = useRef(null);
   const botSudokuTimerRef = useRef(null);
+  const bluffBotTimerRef = useRef(null);
   const processedLiveRoundRef = useRef(0);
   const awardedMatchIdRef = useRef(null);
   const leftNoticeShownRef = useRef(false);
@@ -550,19 +643,25 @@ export default function App() {
       clearTimeout(botSudokuTimerRef.current);
       botSudokuTimerRef.current = null;
     }
+    if (bluffBotTimerRef.current) {
+      clearTimeout(bluffBotTimerRef.current);
+      bluffBotTimerRef.current = null;
+    }
   }
 
   function showNotice(title, text) {
     setNoticeBanner({ title, text, ts: Date.now() });
   }
 
-  function awardWinPoint(matchKey) {
-    if (!matchKey || awardedMatchIdRef.current === matchKey) return;
-    awardedMatchIdRef.current = matchKey;
+  function adjustMyGlobalWins(delta, uniqueKey = null) {
+    if (uniqueKey) {
+      if (awardedMatchIdRef.current === uniqueKey) return;
+      awardedMatchIdRef.current = uniqueKey;
+    }
     const nowTs = Date.now();
     const displayName = isReservedFdName(nickname) ? "FD" : nickname.trim();
     setMyWins((prev) => {
-      const next = prev + 1;
+      const next = Math.max(0, prev + delta);
       if (typeof window !== "undefined") {
         window.localStorage.setItem("duello_my_wins", String(next));
       }
@@ -587,6 +686,10 @@ export default function App() {
       }
       return next;
     });
+  }
+
+  function awardWinPoint(matchKey) {
+    adjustMyGlobalWins(1, matchKey);
   }
 
   useEffect(() => {
@@ -655,7 +758,6 @@ export default function App() {
     }
   }, []);
 
-  // Admin şifre kaydı ve ban listesi dinleme (giriş ekranında bile aktif)
   useEffect(() => {
     if (!dbRef.current) return;
     const unsubAdmin = onValue(ref(dbRef.current, "admin_config/fd"), (snap) => {
@@ -679,7 +781,6 @@ export default function App() {
     };
   }, []);
 
-  // Kullanıcı banlandıysa anında lobi/oyundan çıkar
   useEffect(() => {
     if (!isMyBanned || isFdAdmin) return;
     clearAllGameTimers();
@@ -952,6 +1053,211 @@ export default function App() {
     return () => unsub();
   }, [enteredLobby, dmTarget, myId]);
 
+  // Blöf oyunu senkronizasyonu ve bot otomasyonu
+  const syncBluffState = useCallback(
+    (nextBluff) => {
+      setBluffState(nextBluff);
+      if (dbRef.current && activeMatch && !activeMatch.isBot) {
+        update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState`), {
+          bluff: nextBluff,
+        });
+      }
+    },
+    [activeMatch]
+  );
+
+  const finalizeBluffRound = useCallback(
+    (stateSnapshot, guessesMap) => {
+      const players = stateSnapshot.players || [];
+      const blufferId = stateSnapshot.blufferId;
+      const nonBluffers = players.filter((p) => p.id !== blufferId);
+
+      let transferredToBluffer = 0;
+      const playerDeltas = {};
+      players.forEach((p) => {
+        playerDeltas[p.id] = 0;
+      });
+
+      const details = [];
+
+      nonBluffers.forEach((voter) => {
+        const guessedId = guessesMap[voter.id];
+        const guessedPlayer = players.find((p) => p.id === guessedId);
+        if (guessedId === blufferId) {
+          playerDeltas[voter.id] = 1;
+          details.push(`${voter.name} Blöfçüyü doğru bildi (+1 puan)`);
+        } else {
+          // Yanlış tahmin edenlerden 1 puan düşer (0 altına inmez) ve düşen puan blöfçüye eklenir
+          const actualDeduction = voter.score > 0 ? 1 : 0;
+          playerDeltas[voter.id] = -actualDeduction;
+          transferredToBluffer += actualDeduction;
+          details.push(
+            `${voter.name} yanlış tahmin etti (${guessedPlayer?.name || "?"}) → ${
+              actualDeduction > 0 ? "-1 puan Blöfçüye geçti" : "0 puanı vardı, puan düşemedi"
+            }`
+          );
+        }
+      });
+
+      playerDeltas[blufferId] = (playerDeltas[blufferId] || 0) + transferredToBluffer;
+
+      const updatedPlayers = players.map((p) => ({
+        ...p,
+        score: Math.max(0, Number(p.score || 0) + (playerDeltas[p.id] || 0)),
+      }));
+
+      const myDelta = playerDeltas[myId] || 0;
+      if (myDelta !== 0) {
+        adjustMyGlobalWins(myDelta, `${activeMatch?.roomId}_bluff_r${stateSnapshot.round}_${myId}`);
+      }
+
+      const blufferObj = players.find((p) => p.id === blufferId);
+      const nextState = {
+        ...stateSnapshot,
+        players: updatedPlayers,
+        guesses: guessesMap,
+        phase: "round_result",
+        roundSummary: {
+          blufferId,
+          blufferName: blufferObj?.name || "Blöfçü",
+          secretWord: stateSnapshot.secretWord,
+          transferredToBluffer,
+          playerDeltas,
+          details,
+        },
+      };
+      syncBluffState(nextState);
+    },
+    [myId, activeMatch, syncBluffState]
+  );
+
+  // Blöf bot hamleleri (yalnızca host veya tek kişilik bot modunda çalışır)
+  useEffect(() => {
+    if (!activeMatch || activeMatch.gameType !== "bluff" || !bluffState) return;
+    if (!activeMatch.isHost) return;
+
+    if (bluffBotTimerRef.current) {
+      clearTimeout(bluffBotTimerRef.current);
+      bluffBotTimerRef.current = null;
+    }
+
+    const players = bluffState.players || [];
+    const clues = bluffState.clues || [];
+
+    // 1. Kelime seçen kişi botsa otomatik kelime seç
+    if (bluffState.phase === "selecting_word") {
+      const starter = players.find((p) => p.id === bluffState.starterId);
+      if (starter && starter.isBot) {
+        bluffBotTimerRef.current = setTimeout(() => {
+          const opts = bluffState.wordOptions || pickRandomTenBluffWords();
+          const chosen = opts[Math.floor(Math.random() * opts.length)];
+          syncBluffState({
+            ...bluffState,
+            secretWord: chosen,
+            phase: "cluing",
+          });
+        }, 900);
+      }
+      return;
+    }
+
+    // 2. Çağrışım turunda sırası gelen kişi botsa çağrışım yaz
+    if (bluffState.phase === "cluing") {
+      const activePlayer = players[clues.length % players.length];
+      if (activePlayer && activePlayer.isBot) {
+        bluffBotTimerRef.current = setTimeout(() => {
+          const botWord = getBotClueForBluff(
+            bluffState.secretWord,
+            activePlayer.id === bluffState.blufferId,
+            clues
+          );
+          const nextClues = [
+            ...clues,
+            {
+              playerId: activePlayer.id,
+              playerName: activePlayer.name,
+              text: botWord,
+              cycle: Math.floor(clues.length / players.length) + 1,
+              ts: Date.now(),
+            },
+          ];
+          const everyoneDidAtLeastTwo =
+            nextClues.length >= players.length * 2 && nextClues.length % players.length === 0;
+
+          syncBluffState({
+            ...bluffState,
+            clues: nextClues,
+            phase: everyoneDidAtLeastTwo ? "ask_vote" : "cluing",
+            votePromptVotes: {},
+          });
+        }, 1050);
+      }
+      return;
+    }
+
+    // 3. "Blöfçüyü tahmin etmek istiyor musunuz?" oylamasında botların cevabı
+    if (bluffState.phase === "ask_vote") {
+      const currentVotes = bluffState.votePromptVotes || {};
+      const pendingBot = players.find((p) => p.isBot && !currentVotes[p.id]);
+      if (pendingBot) {
+        bluffBotTimerRef.current = setTimeout(() => {
+          const updatedVotes = {
+            ...currentVotes,
+            [pendingBot.id]: "yes",
+          };
+          const allVoted = players.every((p) => Boolean(updatedVotes[p.id]));
+          if (!allVoted) {
+            syncBluffState({
+              ...bluffState,
+              votePromptVotes: updatedVotes,
+            });
+          } else {
+            const yesCount = Object.values(updatedVotes).filter((v) => v === "yes").length;
+            const majorityYes = yesCount > players.length / 2;
+            syncBluffState({
+              ...bluffState,
+              votePromptVotes: updatedVotes,
+              phase: majorityYes ? "voting" : "cluing",
+              guesses: {},
+            });
+          }
+        }, 750);
+      }
+      return;
+    }
+
+    // 4. Tahmin ekranında kelime kartı olan botların blöfçü tahmini
+    if (bluffState.phase === "voting") {
+      const nonBluffers = players.filter((p) => p.id !== bluffState.blufferId);
+      const currentGuesses = bluffState.guesses || {};
+      const pendingBotVoter = nonBluffers.find((p) => p.isBot && !currentGuesses[p.id]);
+      if (pendingBotVoter) {
+        bluffBotTimerRef.current = setTimeout(() => {
+          const candidates = players.filter((p) => p.id !== pendingBotVoter.id);
+          // Bot %60 ihtimalle gerçek blöfçüyü, %40 ihtimalle başka birini tahmin eder
+          const guessTargetId =
+            Math.random() < 0.6
+              ? bluffState.blufferId
+              : candidates[Math.floor(Math.random() * candidates.length)].id;
+
+          const nextGuesses = {
+            ...currentGuesses,
+            [pendingBotVoter.id]: guessTargetId,
+          };
+          const allGuessed = nonBluffers.every((p) => Boolean(nextGuesses[p.id]));
+          if (!allGuessed) {
+            syncBluffState({
+              ...bluffState,
+              guesses: nextGuesses,
+            });
+          } else {
+            finalizeBluffRound(bluffState, nextGuesses);
+          }
+        }, 900);
+      }
+    }
+  }, [activeMatch, bluffState, syncBluffState, finalizeBluffRound]);
+
   useEffect(() => {
     if (!dbRef.current || !activeMatch || activeMatch.isBot) return;
     const roomRef = ref(dbRef.current, `matches/${activeMatch.roomId}`);
@@ -993,7 +1299,15 @@ export default function App() {
         const gs = data.gameState;
         const isP1 = activeMatch.isHost;
 
-        if (activeMatch.gameType === "battleship") {
+        if (activeMatch.gameType === "bluff" && gs.bluff) {
+          setBluffState(gs.bluff);
+          if (gs.bluff.phase === "round_result" && gs.bluff.roundSummary?.playerDeltas) {
+            const myDelta = Number(gs.bluff.roundSummary.playerDeltas[myId] || 0);
+            if (myDelta !== 0) {
+              adjustMyGlobalWins(myDelta, `${activeMatch.roomId}_bluff_sync_r${gs.bluff.round}_${myId}`);
+            }
+          }
+        } else if (activeMatch.gameType === "battleship") {
           const p1Ships = Array.isArray(gs.p1Ships) ? gs.p1Ships : autoPlaceShips(6);
           const p2Ships = Array.isArray(gs.p2Ships) ? gs.p2Ships : autoPlaceShips(6);
           const p1Shots = Array.isArray(gs.p1Shots) ? gs.p1Shots : createEmptyGrid(6);
@@ -1187,7 +1501,32 @@ export default function App() {
     return () => unsub();
   }, [outgoingInvite]);
 
-  function resetAllGameStates(gameType, isBotMatch = false, roomIdForSync = null, isHostForSync = true) {
+  function buildBluffParticipants(opponent, isBotMatch) {
+    const cleanMyName = nickname.trim() || "Sen";
+    const list = [{ id: myId, name: cleanMyName, isBot: false, score: 0 }];
+    if (!isBotMatch && opponent && opponent.id && opponent.id !== "bot_arena") {
+      list.push({ id: opponent.id, name: opponent.name, isBot: false, score: 0 });
+    }
+    // En az 3 kişi olacak şekilde botlarla tamamla
+    const botPool = [
+      { id: "bot_bluff_1", name: "Blöf Botu Can", isBot: true, score: 0 },
+      { id: "bot_bluff_2", name: "Blöf Botu Ela", isBot: true, score: 0 },
+    ];
+    let idx = 0;
+    while (list.length < 3 && idx < botPool.length) {
+      list.push(botPool[idx]);
+      idx++;
+    }
+    return list;
+  }
+
+  function resetAllGameStates(
+    gameType,
+    isBotMatch = false,
+    roomIdForSync = null,
+    isHostForSync = true,
+    opponentObj = null
+  ) {
     clearAllGameTimers();
     processedLiveRoundRef.current = 0;
     awardedMatchIdRef.current = null;
@@ -1237,9 +1576,16 @@ export default function App() {
     setSudokuWinner(null);
     setOppSudokuProgress(0);
 
+    const participants = buildBluffParticipants(opponentObj || activeMatch?.opponent, isBotMatch);
+    const initialBluff = createInitialBluffState(participants, 1, {});
+    setBluffState(initialBluff);
+    setBluffClueInput("");
+    setBluffSelectedSuspect(null);
+
     if (!isBotMatch && dbRef.current && roomIdForSync && isHostForSync) {
       update(ref(dbRef.current, `matches/${roomIdForSync}/gameState`), {
         phase: "picking",
+        bluff: initialBluff,
         bsTurn: "p1",
         bsWinner: null,
         bsStatus: "Sıra sende! Düşman denizinde bir kare seç.",
@@ -1277,6 +1623,8 @@ export default function App() {
     if (isBotMatch && gameType === "sudoku") {
       botSudokuTimerRef.current = setTimeout(() => setOppSudokuProgress(40), 2200);
     }
+
+    return initialBluff;
   }
 
   function startMatch(opponent, gameType, isBot = false, customRoomId = null, isHost = true) {
@@ -1288,7 +1636,7 @@ export default function App() {
       isHost,
       opponent: { id: opponent.id, name: opponent.name },
     };
-    resetAllGameStates(gameType, isBot, roomId, isHost);
+    const initialBluff = resetAllGameStates(gameType, isBot, roomId, isHost, opponent);
     setActiveMatch(matchObj);
     setSelectedTargetUser(null);
     setOutgoingInvite(null);
@@ -1312,6 +1660,7 @@ export default function App() {
         ],
         gameState: {
           phase: "picking",
+          bluff: initialBluff,
           bsTurn: "p1",
           bsWinner: null,
           bsStatus: "Sıra sende! Düşman denizinde bir kare seç.",
@@ -1337,7 +1686,7 @@ export default function App() {
 
   function sendGameInvite(targetUser, gameId) {
     acceptedHandledRef.current = false;
-    const gameMeta = GAMES_META.find((g) => g.id === gameId) || GAMES_META[1];
+    const gameMeta = GAMES_META.find((g) => g.id === gameId) || GAMES_META[0];
     const invitePayload = {
       fromId: myId,
       fromName: nickname.trim(),
@@ -1395,12 +1744,122 @@ export default function App() {
   function handleRequestNewMatch(gameType) {
     if (!activeMatch) return;
     if (activeMatch.isBot) {
-      resetAllGameStates(gameType, true, activeMatch.roomId, activeMatch.isHost);
+      resetAllGameStates(gameType, true, activeMatch.roomId, activeMatch.isHost, activeMatch.opponent);
       return;
     }
     const targetOpp = activeMatch.opponent;
     leaveMatch();
     sendGameInvite(targetOpp, gameType);
+  }
+
+  // Blöf oyuncu aksiyonları
+  function handleBluffSelectSecretWord(chosenWord) {
+    if (!bluffState || bluffState.phase !== "selecting_word" || bluffState.starterId !== myId) return;
+    syncBluffState({
+      ...bluffState,
+      secretWord: chosenWord,
+      phase: "cluing",
+    });
+  }
+
+  function handleBluffSubmitClue(e) {
+    e.preventDefault();
+    if (!bluffState || bluffState.phase !== "cluing") return;
+    const players = bluffState.players || [];
+    const clues = bluffState.clues || [];
+    const activePlayer = players[clues.length % players.length];
+    if (!activePlayer || activePlayer.id !== myId) return;
+
+    const cleanClue = bluffClueInput.trim();
+    if (!cleanClue) return;
+
+    setBluffClueInput("");
+    const nextClues = [
+      ...clues,
+      {
+        playerId: myId,
+        playerName: nickname.trim() || "Sen",
+        text: cleanClue,
+        cycle: Math.floor(clues.length / players.length) + 1,
+        ts: Date.now(),
+      },
+    ];
+    const everyoneDidAtLeastTwo =
+      nextClues.length >= players.length * 2 && nextClues.length % players.length === 0;
+
+    syncBluffState({
+      ...bluffState,
+      clues: nextClues,
+      phase: everyoneDidAtLeastTwo ? "ask_vote" : "cluing",
+      votePromptVotes: {},
+    });
+  }
+
+  function handleBluffVotePromptAnswer(answer) {
+    if (!bluffState || bluffState.phase !== "ask_vote") return;
+    const players = bluffState.players || [];
+    const currentVotes = bluffState.votePromptVotes || {};
+    if (currentVotes[myId]) return;
+
+    const updatedVotes = {
+      ...currentVotes,
+      [myId]: answer,
+    };
+    const allVoted = players.every((p) => Boolean(updatedVotes[p.id]));
+    if (!allVoted) {
+      syncBluffState({
+        ...bluffState,
+        votePromptVotes: updatedVotes,
+      });
+    } else {
+      const yesCount = Object.values(updatedVotes).filter((v) => v === "yes").length;
+      const majorityYes = yesCount > players.length / 2;
+      syncBluffState({
+        ...bluffState,
+        votePromptVotes: updatedVotes,
+        phase: majorityYes ? "voting" : "cluing",
+        guesses: {},
+      });
+    }
+  }
+
+  function handleBluffSubmitGuess() {
+    if (!bluffState || bluffState.phase !== "voting" || !bluffSelectedSuspect) return;
+    if (myId === bluffState.blufferId) return;
+    const players = bluffState.players || [];
+    const nonBluffers = players.filter((p) => p.id !== bluffState.blufferId);
+    const currentGuesses = bluffState.guesses || {};
+    if (currentGuesses[myId]) return;
+
+    const nextGuesses = {
+      ...currentGuesses,
+      [myId]: bluffSelectedSuspect,
+    };
+    setBluffSelectedSuspect(null);
+
+    const allGuessed = nonBluffers.every((p) => Boolean(nextGuesses[p.id]));
+    if (!allGuessed) {
+      syncBluffState({
+        ...bluffState,
+        guesses: nextGuesses,
+      });
+    } else {
+      finalizeBluffRound(bluffState, nextGuesses);
+    }
+  }
+
+  function handleBluffNextRound() {
+    if (!bluffState) return;
+    const currentPlayers = bluffState.players || [];
+    const scoreMap = {};
+    currentPlayers.forEach((p) => {
+      scoreMap[p.id] = p.score || 0;
+    });
+    const nextRoundNum = Number(bluffState.round || 1) + 1;
+    const nextState = createInitialBluffState(currentPlayers, nextRoundNum, scoreMap);
+    setBluffClueInput("");
+    setBluffSelectedSuspect(null);
+    syncBluffState(nextState);
   }
 
   function handleSendGlobalMessage(e) {
@@ -2079,7 +2538,7 @@ export default function App() {
             </div>
             <h1 className="text-3xl font-extrabold tracking-tight text-white">Düello Arenası</h1>
             <p className="text-sm text-slate-400">
-              Aktif oyuncularla eşleş, sohbet et ve 5 farklı oyunda yarış.
+              Aktif oyuncularla eşleş, sohbet et ve 6 farklı oyunda yarış.
             </p>
           </div>
 
@@ -2155,8 +2614,8 @@ export default function App() {
 
           <div className="grid grid-cols-3 gap-2 text-center text-xs text-slate-400">
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
-              <div className="font-semibold text-slate-200">5 Oyun</div>
-              <div>Amiral Battı, Sudoku...</div>
+              <div className="font-semibold text-slate-200">6 Oyun</div>
+              <div>Blöf, Amiral Battı...</div>
             </div>
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
               <div className="font-semibold text-slate-200">1 Saatlik Sohbet</div>
@@ -2179,11 +2638,25 @@ export default function App() {
   }
 
   if (activeMatch) {
-    const gameInfo = GAMES_META.find((g) => g.id === activeMatch.gameType) || GAMES_META[1];
+    const gameInfo = GAMES_META.find((g) => g.id === activeMatch.gameType) || GAMES_META[0];
     const shownMyPick = rpsMyPick || rpsLastShownMyPick;
     const shownOppPick = rpsOppPick || rpsLastShownOppPick;
     const totalShipCells = countShipCells(enemyGridForBot);
     const myHitCells = countHitsOnGrid(myShotsOnEnemy);
+
+    // Blöf görünüm hesaplamaları
+    const bluffPlayers = bluffState?.players || [];
+    const bluffClues = bluffState?.clues || [];
+    const amIBluffer = bluffState?.blufferId === myId;
+    const amIBluffStarter = bluffState?.starterId === myId;
+    const bluffStarterObj = bluffPlayers.find((p) => p.id === bluffState?.starterId);
+    const activeBluffCluer =
+      bluffState?.phase === "cluing" && bluffPlayers.length > 0
+        ? bluffPlayers[bluffClues.length % bluffPlayers.length]
+        : null;
+    const isMyBluffClueTurn = activeBluffCluer?.id === myId;
+    const myPromptVote = bluffState?.votePromptVotes?.[myId] || null;
+    const myBluffGuess = bluffState?.guesses?.[myId] || null;
 
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col pb-20 relative">
@@ -2207,7 +2680,9 @@ export default function App() {
               )}
             </div>
             <p className="text-sm font-semibold text-white">
-              {nickname.trim()} vs {activeMatch.opponent.name}
+              {activeMatch.gameType === "bluff"
+                ? `${bluffPlayers.length} Oyuncu • Tur ${bluffState?.round || 1}`
+                : `${nickname.trim()} vs ${activeMatch.opponent.name}`}
             </p>
           </div>
 
@@ -2218,7 +2693,8 @@ export default function App() {
                   activeMatch.gameType,
                   activeMatch.isBot,
                   activeMatch.roomId,
-                  activeMatch.isHost
+                  activeMatch.isHost,
+                  activeMatch.opponent
                 )
               }
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200"
@@ -2251,6 +2727,326 @@ export default function App() {
         </div>
 
         <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4">
+          {activeMatch.gameType === "bluff" && bluffState && (
+            <div className="space-y-4">
+              {/* Masa Oyuncuları & Puan Tablosu */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-indigo-300">
+                    Tur #{bluffState.round} • Masa Skoru
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    Seçen: {bluffStarterObj?.name || "-"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {bluffPlayers.map((p) => {
+                    const isTurnNow =
+                      (bluffState.phase === "selecting_word" && bluffState.starterId === p.id) ||
+                      (bluffState.phase === "cluing" && activeBluffCluer?.id === p.id);
+                    const revealBluffer = bluffState.phase === "round_result" && bluffState.blufferId === p.id;
+                    return (
+                      <div
+                        key={p.id}
+                        className={`p-2 rounded-xl border text-center space-y-0.5 ${
+                          revealBluffer
+                            ? "bg-rose-950/60 border-rose-500 text-rose-200"
+                            : isTurnNow
+                            ? "bg-indigo-950/60 border-indigo-400 text-white"
+                            : "bg-slate-950/80 border-slate-800 text-slate-200"
+                        }`}
+                      >
+                        <div className="text-xs font-bold truncate">
+                          {p.name} {p.id === myId ? "(Sen)" : ""}
+                        </div>
+                        <div className="text-sm font-extrabold text-amber-300">{p.score} Puan</div>
+                        <div className="text-[10px] text-slate-400">
+                          {revealBluffer
+                            ? "🎭 BLÖFÇÜ"
+                            : isTurnNow
+                            ? "Sıra onda"
+                            : p.isBot
+                            ? "Bot"
+                            : "Oyuncu"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Rol & Gizli Kelime Kartı */}
+              <div
+                className={`rounded-2xl p-4 border space-y-2 ${
+                  amIBluffer
+                    ? "bg-rose-950/45 border-rose-500/50"
+                    : "bg-emerald-950/35 border-emerald-500/40"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span
+                    className={`text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5 ${
+                      amIBluffer ? "text-rose-300" : "text-emerald-300"
+                    }`}
+                  >
+                    {amIBluffer ? (
+                      <>
+                        <EyeOff className="w-4 h-4" />
+                        SANA BLÖF KARTI GELDİ!
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-4 h-4" />
+                        KELİME KARTI SENDE
+                      </>
+                    )}
+                  </span>
+                  <span className="text-[11px] text-slate-300">
+                    {amIBluffer ? "Kelimeyi göremezsin" : "Gizli kelimeyi biliyorsun"}
+                  </span>
+                </div>
+
+                {amIBluffer ? (
+                  <p className="text-xs text-rose-100/90 leading-relaxed">
+                    Gizli kelimeyi bilmiyorsun! Diğer oyuncuların yazdığı çağrışımlara bakarak kelimeyi tahmin etmeye çalış ve belli etmeden yakın bir çağrışım yaz.
+                  </p>
+                ) : bluffState.secretWord ? (
+                  <div className="bg-slate-950/80 border border-emerald-500/30 rounded-xl p-3 text-center">
+                    <div className="text-[11px] text-slate-400">Bu Turun Gizli Kelimesi</div>
+                    <div className="text-2xl font-black tracking-wide text-emerald-300 mt-0.5">
+                      {bluffState.secretWord}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-emerald-100/90">
+                    {amIBluffStarter
+                      ? "Aşağıdaki 10 kelimeden birini seç; kelime kartı olan diğer oyuncular da seçtiğin kelimeyi görecek."
+                      : `${bluffStarterObj?.name || "Başlayan oyuncu"} 10 kelimeden birini seçiyor...`}
+                  </p>
+                )}
+              </div>
+
+              {/* AŞAMA 1: 10 Kelimeden Seçim */}
+              {bluffState.phase === "selecting_word" && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                  <div className="text-xs font-bold text-white">
+                    {amIBluffStarter
+                      ? "10 Kelimelik Kartından Bir Kelime Seç:"
+                      : `${bluffStarterObj?.name || "Oyuncu"} kelime seçiyor...`}
+                  </div>
+                  {!amIBluffer && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {(bluffState.wordOptions || []).map((w, idx) => (
+                        <button
+                          key={w}
+                          disabled={!amIBluffStarter}
+                          onClick={() => handleBluffSelectSecretWord(w)}
+                          className={`p-2.5 rounded-xl border text-left text-xs font-bold transition ${
+                            amIBluffStarter
+                              ? "bg-slate-950 hover:bg-indigo-600/25 border-slate-700 hover:border-indigo-400 text-white active:scale-95"
+                              : "bg-slate-950/60 border-slate-800 text-slate-300 cursor-default"
+                          }`}
+                        >
+                          <span className="text-indigo-400 mr-1.5">{idx + 1}.</span>
+                          {w}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Yazılan Çağrışımlar Listesi */}
+              {bluffState.phase !== "selecting_word" && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white">
+                      Yazılan Çağrışımlar ({bluffClues.length} / min {bluffPlayers.length * 2})
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Tur {Math.floor(bluffClues.length / Math.max(1, bluffPlayers.length)) + 1}
+                    </span>
+                  </div>
+
+                  {bluffClues.length === 0 ? (
+                    <p className="text-xs text-slate-400 text-center py-3">
+                      İlk çağrışımı {activeBluffCluer?.name || "başlayan oyuncu"} yazacak...
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {bluffClues.map((c, i) => (
+                        <div
+                          key={`${c.playerId}-${i}`}
+                          className="px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-bold">
+                              #{c.cycle || 1}
+                            </span>
+                            <span className="font-semibold text-indigo-300">{c.playerName}:</span>
+                          </div>
+                          <span className="font-extrabold text-white">{c.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {bluffState.phase === "cluing" && (
+                    <div className="pt-1">
+                      {isMyBluffClueTurn ? (
+                        <form onSubmit={handleBluffSubmitClue} className="flex gap-2">
+                          <input
+                            type="text"
+                            maxLength={24}
+                            value={bluffClueInput}
+                            onChange={(e) => setBluffClueInput(e.target.value)}
+                            placeholder={
+                              amIBluffer
+                                ? "Belli etmeden yakın bir çağrışım yaz..."
+                                : `"${bluffState.secretWord}" kelimesine yakın çağrışım yaz...`
+                            }
+                            className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-indigo-500/60 text-xs text-white focus:outline-none"
+                          />
+                          <button
+                            type="submit"
+                            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                          >
+                            Gönder
+                          </button>
+                        </form>
+                      ) : (
+                        <p className="text-xs text-center text-amber-300 font-medium">
+                          Sıra {activeBluffCluer?.name || "oyuncuda"} — çağrışım yazması bekleniyor...
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* AŞAMA 3: En Az 2 Çağrışım Sonrası Tahmin Oylaması Uyarısı */}
+              {bluffState.phase === "ask_vote" && (
+                <div className="bg-amber-950/55 border border-amber-500/50 rounded-2xl p-4 space-y-3 text-center">
+                  <HelpCircle className="w-7 h-7 text-amber-300 mx-auto" />
+                  <div className="text-sm font-extrabold text-white">
+                    Blöfçüyü tahmin etmek istiyor musunuz?
+                  </div>
+                  <p className="text-xs text-amber-100/90">
+                    Herkes en az 2 çağrışımını yaptı. Çoğunluk <strong>Evet</strong> derse tahmin ekranı açılacak; <strong>Hayır</strong> derse yeni çağrışım turu devam edecek.
+                  </p>
+
+                  {myPromptVote ? (
+                    <div className="text-xs font-bold text-emerald-300">
+                      Oyun kaydedildi ({myPromptVote === "yes" ? "Evet" : "Hayır"}). Diğer oyuncular bekleniyor...
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <button
+                        onClick={() => handleBluffVotePromptAnswer("yes")}
+                        className="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white"
+                      >
+                        Evet, Tahmin Edelim
+                      </button>
+                      <button
+                        onClick={() => handleBluffVotePromptAnswer("no")}
+                        className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-xs text-slate-200"
+                      >
+                        Hayır, Çağrışım Devam Etsin
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* AŞAMA 4: Blöfçü Tahmin Ekranı */}
+              {bluffState.phase === "voting" && (
+                <div className="bg-slate-900 border border-indigo-500/40 rounded-2xl p-4 space-y-3">
+                  <div className="text-sm font-extrabold text-white text-center">
+                    Blöf Kartı Kimde? Tahmin Et!
+                  </div>
+
+                  {amIBluffer ? (
+                    <p className="text-xs text-center text-rose-200 py-2">
+                      Blöf kartı sende! Kelime kartı olan oyuncular seni bulmaya çalışıyor...
+                    </p>
+                  ) : myBluffGuess ? (
+                    <p className="text-xs text-center text-emerald-300 font-semibold py-2">
+                      Tahminin alındı! Diğer oyuncuların tahmini bekleniyor...
+                    </p>
+                  ) : (
+                    <>
+                      <div className="space-y-2">
+                        {bluffPlayers
+                          .filter((p) => p.id !== myId)
+                          .map((candidate) => {
+                            const selected = bluffSelectedSuspect === candidate.id;
+                            return (
+                              <button
+                                key={candidate.id}
+                                onClick={() => setBluffSelectedSuspect(candidate.id)}
+                                className={`w-full p-3 rounded-xl border text-left flex items-center justify-between text-xs font-bold transition ${
+                                  selected
+                                    ? "bg-rose-600/25 border-rose-400 text-white"
+                                    : "bg-slate-950/80 border-slate-800 text-slate-200"
+                                }`}
+                              >
+                                <span>{candidate.name}</span>
+                                {selected && <Check className="w-4 h-4 text-rose-400" />}
+                              </button>
+                            );
+                          })}
+                      </div>
+
+                      <button
+                        disabled={!bluffSelectedSuspect}
+                        onClick={handleBluffSubmitGuess}
+                        className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-45 font-bold text-xs text-white"
+                      >
+                        Tahmini Onayla
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* AŞAMA 5: Tur Sonucu & Tekrar Başlat */}
+              {bluffState.phase === "round_result" && bluffState.roundSummary && (
+                <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl p-4 space-y-3">
+                  <div className="text-center space-y-1">
+                    <Trophy className="w-8 h-8 text-amber-400 mx-auto" />
+                    <div className="text-base font-extrabold text-white">
+                      Tur #{bluffState.round} Sonucu
+                    </div>
+                    <p className="text-xs text-slate-300">
+                      Gizli Kelime: <strong className="text-emerald-300">{bluffState.roundSummary.secretWord}</strong> • Blöfçü:{" "}
+                      <strong className="text-rose-300">{bluffState.roundSummary.blufferName}</strong>
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-1.5 text-xs">
+                    {(bluffState.roundSummary.details || []).map((line, i) => (
+                      <div key={i} className="text-slate-200">
+                        • {line}
+                      </div>
+                    ))}
+                    <div className="pt-1 border-t border-slate-800 font-bold text-amber-300">
+                      Blöfçü ({bluffState.roundSummary.blufferName}) toplam +
+                      {bluffState.roundSummary.transferredToBluffer || 0} puan kazandı!
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleBluffNextRound}
+                    className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-xs text-white flex items-center justify-center gap-1.5"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Oyun Tekrar Başlat (Sonraki Tur)
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeMatch.gameType === "battleship" && (
             <div className="space-y-4">
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 text-center space-y-1">
@@ -3158,7 +3954,7 @@ export default function App() {
                         disabled={isBusy}
                         onClick={() => {
                           setSelectedTargetUser(u);
-                          setSelectedGameForInvite("rps");
+                          setSelectedGameForInvite("bluff");
                         }}
                         className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs font-bold text-white flex items-center gap-1"
                       >
