@@ -42,6 +42,7 @@ import {
   HelpCircle,
   UserPlus,
   Play,
+  CornerUpLeft,
 } from "lucide-react";
 
 const FIREBASE_CONFIG =
@@ -495,6 +496,18 @@ export default function App() {
   const [selectedTargetUser, setSelectedTargetUser] = useState(null);
   const [selectedGameForInvite, setSelectedGameForInvite] = useState("bluff");
 
+  // Çıkış onayı & lobiye çıkınca geri dönülebilir maç kaydı
+  const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
+  const [resumableMatch, setResumableMatch] = useState(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem("duello_resumable_match");
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+
   const [globalChatOpen, setGlobalChatOpen] = useState(true);
   const [globalMessages, setGlobalMessages] = useState([
     {
@@ -755,6 +768,15 @@ export default function App() {
   }, [activeMatch]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (resumableMatch) {
+      window.localStorage.setItem("duello_resumable_match", JSON.stringify(resumableMatch));
+    } else {
+      window.localStorage.removeItem("duello_resumable_match");
+    }
+  }, [resumableMatch]);
+
+  useEffect(() => {
     if (!FIREBASE_CONFIG || !FIREBASE_CONFIG.databaseURL) return;
     try {
       const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
@@ -794,6 +816,8 @@ export default function App() {
       remove(ref(dbRef.current, `users/${myId}`));
     }
     setActiveMatch(null);
+    setResumableMatch(null);
+    setExitConfirmOpen(false);
     setBluffLobbyOpen(false);
     setEnteredLobby(false);
     setLoginError("Yönetici (FD) tarafından siteden uzaklaştırıldınız.");
@@ -1268,6 +1292,8 @@ export default function App() {
         leftNoticeShownRef.current = true;
         clearAllGameTimers();
         setActiveMatch(null);
+        setResumableMatch(null);
+        setExitConfirmOpen(false);
         setMatchDrawerOpen(false);
         if (typeof window !== "undefined") {
           window.localStorage.removeItem("duello_active_match");
@@ -1501,7 +1527,7 @@ export default function App() {
     return () => unsub();
   }, [outgoingInvite]);
 
-  // Blöf çoklu davet yanıtlarını dinle (hemen oyun başlatmadan masaya ekler)
+  // Blöf çoklu davet yanıtlarını dinle
   useEffect(() => {
     const invitedEntries = Object.entries(bluffInvitedIds || {});
     if (invitedEntries.length === 0) return;
@@ -1631,6 +1657,8 @@ export default function App() {
     setBluffLobbyOpen(false);
     setBluffInvitedIds({});
     setBluffJoinedMembers([]);
+    setResumableMatch(null);
+    setExitConfirmOpen(false);
     clearAllGameTimers();
     processedLiveRoundRef.current = 0;
     awardedMatchIdRef.current = null;
@@ -1796,6 +1824,8 @@ export default function App() {
       opponent: { id: opponent.id, name: opponent.name },
     };
     const initialBluff = resetAllGameStates(gameType, isBot, roomId, isHost, opponent);
+    setResumableMatch(null);
+    setExitConfirmOpen(false);
     setActiveMatch(matchObj);
     setSelectedTargetUser(null);
     setOutgoingInvite(null);
@@ -1914,15 +1944,49 @@ export default function App() {
     setIncomingInvite(null);
   }
 
-  function leaveMatch() {
+  function confirmLeaveMatchToLobby() {
+    if (!activeMatch) return;
     clearAllGameTimers();
-    if (dbRef.current && activeMatch && !activeMatch.isBot) {
-      update(ref(dbRef.current, `matches/${activeMatch.roomId}`), { leftBy: myId });
-    }
-    setActiveMatch(null);
+    setExitConfirmOpen(false);
     setMatchDrawerOpen(false);
+    setResumableMatch({
+      ...activeMatch,
+      savedAt: Date.now(),
+    });
+    setActiveMatch(null);
     if (typeof window !== "undefined") {
       window.localStorage.removeItem("duello_active_match");
+    }
+  }
+
+  function handleResumeSavedMatch() {
+    if (!resumableMatch) return;
+    const restored = {
+      roomId: resumableMatch.roomId,
+      gameType: resumableMatch.gameType,
+      isBot: Boolean(resumableMatch.isBot),
+      isHost: Boolean(resumableMatch.isHost),
+      opponent: resumableMatch.opponent || { id: "bot_arena", name: "Arena Botu" },
+    };
+    if (restored.gameType === "bluff" && !bluffState) {
+      const participants = buildBluffParticipantsFromTable(
+        !restored.isBot && restored.opponent?.id !== "bot_arena"
+          ? [{ id: restored.opponent.id, name: restored.opponent.name }]
+          : []
+      );
+      setBluffState(createInitialBluffState(participants, 1, {}));
+    }
+    setResumableMatch(null);
+    setActiveMatch(restored);
+  }
+
+  function handleDismissResumableMatch() {
+    if (dbRef.current && resumableMatch && !resumableMatch.isBot) {
+      update(ref(dbRef.current, `matches/${resumableMatch.roomId}`), { leftBy: myId });
+    }
+    setResumableMatch(null);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("duello_resumable_match");
     }
   }
 
@@ -1933,10 +1997,16 @@ export default function App() {
       return;
     }
     const targetOpp = activeMatch.opponent;
-    leaveMatch();
+    if (dbRef.current) {
+      update(ref(dbRef.current, `matches/${activeMatch.roomId}`), { leftBy: myId });
+    }
+    clearAllGameTimers();
+    setActiveMatch(null);
+    setResumableMatch(null);
+    setExitConfirmOpen(false);
+    setMatchDrawerOpen(false);
     sendGameInvite(targetOpp, gameType);
   }
-
   // Blöf oyuncu aksiyonları
   function handleBluffSelectSecretWord(chosenWord) {
     if (!bluffState || bluffState.phase !== "selecting_word" || bluffState.starterId !== myId) return;
@@ -2710,6 +2780,7 @@ export default function App() {
       .sort((a, b) => b.lastSeenAt - a.lastSeenAt || b.wins - a.wins)
       .slice(0, 5);
   }, [combinedPlayersForLists]);
+
   if (!enteredLobby) {
     const needsFirstTimeFdSetup = typingFdName && (!storedFdAuth || !storedFdAuth.passwordHash);
 
@@ -2885,7 +2956,7 @@ export default function App() {
               <RotateCcw className="w-4 h-4" />
             </button>
             <button
-              onClick={leaveMatch}
+              onClick={() => setExitConfirmOpen(true)}
               className="px-3 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center gap-1"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -2893,6 +2964,36 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {exitConfirmOpen && (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl text-center">
+              <div className="w-11 h-11 rounded-2xl bg-rose-500/15 border border-rose-500/40 text-rose-300 flex items-center justify-center mx-auto">
+                <LogOut className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold text-white">Oyundan çıkmak istiyor musun?</h3>
+                <p className="text-xs text-slate-400">
+                  Lobiye dönersen istersen lobiden bu maça tekrar geri dönebilirsin.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  onClick={() => setExitConfirmOpen(false)}
+                  className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-xs text-slate-200"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  onClick={confirmLeaveMatchToLobby}
+                  className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 font-bold text-xs text-white"
+                >
+                  Evet, Çık
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="px-4 py-2 bg-slate-900/50 border-b border-slate-800/70 flex items-center justify-between gap-2 overflow-x-auto">
           <span className="text-[11px] text-slate-400 shrink-0">Tepki:</span>
@@ -3806,6 +3907,9 @@ export default function App() {
   const bannedEntries = Object.values(bannedUsers || {});
   const totalBluffTablePlayers = 1 + bluffJoinedMembers.length;
   const neededBotsForBluff = Math.max(0, 3 - totalBluffTablePlayers);
+  const resumableGameMeta = resumableMatch
+    ? GAMES_META.find((g) => g.id === resumableMatch.gameType) || GAMES_META[0]
+    : null;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-12">
@@ -3849,6 +3953,37 @@ export default function App() {
       </header>
 
       <main className="max-w-md mx-auto p-4 space-y-5">
+        {resumableMatch && resumableGameMeta && (
+          <div className="bg-indigo-950/75 border border-indigo-400/50 rounded-2xl p-4 shadow-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
+                <CornerUpLeft className="w-4 h-4" />
+                Yarıda Kalan Maçın Var
+              </span>
+              <span className="text-[11px] text-slate-300">{resumableGameMeta.name}</span>
+            </div>
+            <p className="text-xs text-white">
+              <strong>{resumableMatch.opponent?.name || "Rakip"}</strong> ile maçından lobiye döndün. İstersen hemen geri dönebilirsin.
+            </p>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                onClick={handleResumeSavedMatch}
+                className="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white flex items-center justify-center gap-1.5"
+              >
+                <CornerUpLeft className="w-4 h-4" />
+                Oyuna Geri Dön
+              </button>
+              <button
+                onClick={handleDismissResumableMatch}
+                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-xs text-slate-200 flex items-center justify-center gap-1.5"
+              >
+                <X className="w-4 h-4" />
+                Maçı Kapat
+              </button>
+            </div>
+          </div>
+        )}
+
         {noticeBanner && (
           <div className="bg-amber-950/70 border border-amber-500/50 rounded-2xl p-3.5 shadow-xl flex items-start justify-between gap-2">
             <div className="space-y-0.5">
