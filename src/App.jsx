@@ -485,10 +485,12 @@ export default function App() {
   const [reportTargetUser, setReportTargetUser] = useState(null);
   const [reportReason, setReportReason] = useState("");
 
-  // Blöf çoklu davet & masa bekleme odası
+  // Blöf çoklu davet & senkronize masa bekleme odası
+  const [bluffTableId, setBluffTableId] = useState(null);
   const [bluffLobbyOpen, setBluffLobbyOpen] = useState(false);
   const [bluffInvitedIds, setBluffInvitedIds] = useState({});
   const [bluffJoinedMembers, setBluffJoinedMembers] = useState([]);
+  const [joinedBluffTable, setJoinedBluffTable] = useState(null);
 
   const [incomingInvite, setIncomingInvite] = useState(null);
   const [outgoingInvite, setOutgoingInvite] = useState(null);
@@ -819,6 +821,8 @@ export default function App() {
     setResumableMatch(null);
     setExitConfirmOpen(false);
     setBluffLobbyOpen(false);
+    setBluffTableId(null);
+    setJoinedBluffTable(null);
     setEnteredLobby(false);
     setLoginError("Yönetici (FD) tarafından siteden uzaklaştırıldınız.");
   }, [isMyBanned, isFdAdmin, myId]);
@@ -1527,7 +1531,26 @@ export default function App() {
     return () => unsub();
   }, [outgoingInvite]);
 
-  // Blöf çoklu davet yanıtlarını dinle
+  // Masa sahibi: ortak bluff_tables/${bluffTableId}/members düğümünden katılımcıları canlı dinle
+  useEffect(() => {
+    if (!dbRef.current || !bluffLobbyOpen || !bluffTableId) return;
+    const membersRef = ref(dbRef.current, `bluff_tables/${bluffTableId}/members`);
+    const unsub = onValue(membersRef, (snap) => {
+      const val = snap.val() || {};
+      const joinedList = Object.values(val).filter((m) => m && m.id && m.id !== myId);
+      setBluffJoinedMembers(joinedList);
+      setBluffInvitedIds((prev) => {
+        const next = { ...prev };
+        joinedList.forEach((m) => {
+          next[m.id] = "accepted";
+        });
+        return next;
+      });
+    });
+    return () => unsub();
+  }, [bluffLobbyOpen, bluffTableId, myId]);
+
+  // Masa sahibi: davet edilenlerin reddetme yanıtlarını dinle
   useEffect(() => {
     const invitedEntries = Object.entries(bluffInvitedIds || {});
     if (invitedEntries.length === 0) return;
@@ -1560,7 +1583,7 @@ export default function App() {
           setBluffJoinedMembers((prev) =>
             prev.some((m) => m.id === uid)
               ? prev
-              : [...prev, { id: uid, name: val.toName || "Oyuncu" }]
+              : [...prev, { id: uid, name: val.acceptedByName || val.toName || "Oyuncu" }]
           );
           remove(invRef);
         } else if (val.status === "declined") {
@@ -1575,21 +1598,103 @@ export default function App() {
     };
   }, [bluffInvitedIds, users, myId]);
 
+  // Davet edilen oyuncu: katıldığı Blöf masasını dinle; masa sahibi Başlat deyince otomatik maça geç
+  useEffect(() => {
+    if (!dbRef.current || !joinedBluffTable || !joinedBluffTable.tableId) return;
+    const tableRef = ref(dbRef.current, `bluff_tables/${joinedBluffTable.tableId}`);
+    const unsub = onValue(tableRef, (snap) => {
+      const val = snap.val();
+      if (!val) {
+        setJoinedBluffTable(null);
+        showNotice("Blöf Masası Kapatıldı", "Masa kurucusu Blöf masasını kapattı.");
+        return;
+      }
+
+      const membersObj = val.members || {};
+      const memberNames = Object.values(membersObj)
+        .filter(Boolean)
+        .map((m) => m.name);
+      setJoinedBluffTable((prev) =>
+        prev ? { ...prev, memberNames, status: val.status || "waiting" } : null
+      );
+
+      if (val.status === "started" && val.roomId) {
+        const rId = val.roomId;
+        const hostId = val.hostId || joinedBluffTable.hostId;
+        const hostName = val.hostName || joinedBluffTable.hostName;
+        const initialBluff = val.initialBluff || null;
+        const allPlayers = Array.isArray(val.players) ? val.players : [];
+
+        setJoinedBluffTable(null);
+        setResumableMatch(null);
+        setExitConfirmOpen(false);
+        clearAllGameTimers();
+        processedLiveRoundRef.current = 0;
+        awardedMatchIdRef.current = null;
+        leftNoticeShownRef.current = false;
+
+        if (initialBluff) {
+          setBluffState(initialBluff);
+        }
+        setBluffClueInput("");
+        setBluffSelectedSuspect(null);
+        setMatchMessages([
+          {
+            id: "m_" + Date.now(),
+            senderId: "sys",
+            senderName: "Sistem",
+            text: `Blöf oyunu ${Math.max(3, allPlayers.length)} oyuncuyla başladı!`,
+            ts: Date.now(),
+          },
+        ]);
+        setMatchUnread(0);
+        setMatchDrawerOpen(false);
+        setFloatingReaction(null);
+
+        setActiveMatch({
+          roomId: rId,
+          gameType: "bluff",
+          isBot: false,
+          isHost: false,
+          opponent: { id: hostId, name: hostName },
+        });
+      }
+    });
+    return () => unsub();
+  }, [joinedBluffTable]);
   function openBluffTable(initialInvitee = null) {
     setSelectedTargetUser(null);
+    const newTableId = `bt_${myId}_${Date.now()}`;
+    const hostName = nickname.trim() || "Oyuncu";
+    setBluffTableId(newTableId);
     setBluffLobbyOpen(true);
     setBluffJoinedMembers([]);
+
+    if (dbRef.current) {
+      set(ref(dbRef.current, `bluff_tables/${newTableId}`), {
+        tableId: newTableId,
+        hostId: myId,
+        hostName,
+        status: "waiting",
+        createdAt: Date.now(),
+        members: {
+          [myId]: { id: myId, name: hostName },
+        },
+      });
+    }
+
     if (initialInvitee && initialInvitee.id) {
       setBluffInvitedIds({ [initialInvitee.id]: "pending" });
       if (dbRef.current) {
         set(ref(dbRef.current, `invites/${initialInvitee.id}`), {
           fromId: myId,
-          fromName: nickname.trim(),
+          fromName: hostName,
           toId: initialInvitee.id,
           toName: initialInvitee.name,
           gameId: "bluff",
           gameName: "Blöf",
           lobbyMode: "bluff_table",
+          tableId: newTableId,
           status: "pending",
           ts: Date.now(),
         });
@@ -1599,11 +1704,38 @@ export default function App() {
     }
   }
 
+  function closeBluffTable() {
+    if (dbRef.current && bluffTableId) {
+      remove(ref(dbRef.current, `bluff_tables/${bluffTableId}`));
+    }
+    setBluffLobbyOpen(false);
+    setBluffTableId(null);
+    setBluffInvitedIds({});
+    setBluffJoinedMembers([]);
+  }
+
   function sendBluffInviteToUser(targetUser) {
     if (!targetUser || !targetUser.id || targetUser.status === "in_game") return;
     if (bluffInvitedIds[targetUser.id] === "pending" || bluffInvitedIds[targetUser.id] === "accepted") {
       return;
     }
+    const activeTableId = bluffTableId || `bt_${myId}_${Date.now()}`;
+    if (!bluffTableId) {
+      setBluffTableId(activeTableId);
+      if (dbRef.current) {
+        set(ref(dbRef.current, `bluff_tables/${activeTableId}`), {
+          tableId: activeTableId,
+          hostId: myId,
+          hostName: nickname.trim() || "Oyuncu",
+          status: "waiting",
+          createdAt: Date.now(),
+          members: {
+            [myId]: { id: myId, name: nickname.trim() || "Oyuncu" },
+          },
+        });
+      }
+    }
+
     setBluffInvitedIds((prev) => ({ ...prev, [targetUser.id]: "pending" }));
     if (dbRef.current) {
       set(ref(dbRef.current, `invites/${targetUser.id}`), {
@@ -1614,6 +1746,7 @@ export default function App() {
         gameId: "bluff",
         gameName: "Blöf",
         lobbyMode: "bluff_table",
+        tableId: activeTableId,
         status: "pending",
         ts: Date.now(),
       });
@@ -1653,8 +1786,10 @@ export default function App() {
       };
     const roomId = `bluff_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const initialBluff = createInitialBluffState(participants, 1, {});
+    const currentTableId = bluffTableId;
 
     setBluffLobbyOpen(false);
+    setBluffTableId(null);
     setBluffInvitedIds({});
     setBluffJoinedMembers([]);
     setResumableMatch(null);
@@ -1700,6 +1835,18 @@ export default function App() {
           bluff: initialBluff,
         },
       });
+
+      if (currentTableId) {
+        update(ref(dbRef.current, `bluff_tables/${currentTableId}`), {
+          status: "started",
+          roomId,
+          players: participants,
+          initialBluff,
+          startedAt: Date.now(),
+        });
+      }
+    } else if (dbRef.current && currentTableId) {
+      remove(ref(dbRef.current, `bluff_tables/${currentTableId}`));
     }
   }
 
@@ -1759,11 +1906,13 @@ export default function App() {
     setSudokuWinner(null);
     setOppSudokuProgress(0);
 
-    const extraHumans =
-      !isBotMatch && opponentObj && opponentObj.id && opponentObj.id !== "bot_arena"
+    const existingHumans =
+      bluffState && Array.isArray(bluffState.players)
+        ? bluffState.players.filter((p) => !p.isBot && p.id !== myId).map((p) => ({ id: p.id, name: p.name }))
+        : !isBotMatch && opponentObj && opponentObj.id && opponentObj.id !== "bot_arena"
         ? [{ id: opponentObj.id, name: opponentObj.name }]
         : [];
-    const participants = buildBluffParticipantsFromTable(extraHumans);
+    const participants = buildBluffParticipantsFromTable(existingHumans);
     const initialBluff = createInitialBluffState(participants, 1, {});
     setBluffState(initialBluff);
     setBluffClueInput("");
@@ -1909,20 +2058,38 @@ export default function App() {
       incomingInvite.gameId === "bluff" && incomingInvite.lobbyMode === "bluff_table";
 
     if (isBluffTableInvite) {
+      const cleanMyName = nickname.trim() || "Oyuncu";
+      const tId = incomingInvite.tableId;
       if (dbRef.current) {
+        if (tId) {
+          set(ref(dbRef.current, `bluff_tables/${tId}/members/${myId}`), {
+            id: myId,
+            name: cleanMyName,
+          });
+        }
         update(ref(dbRef.current, `invites/${myId}`), {
           status: "accepted",
           acceptedById: myId,
-          acceptedByName: nickname.trim(),
+          acceptedByName: cleanMyName,
           ts: Date.now(),
         });
       }
       const hostInfo = { id: incomingInvite.fromId, name: incomingInvite.fromName };
       setIncomingInvite(null);
-      showNotice(
-        "Blöf Masasına Katıldın",
-        `${hostInfo.name} masasında diğer oyuncuların katılımı ve oyunun başlatılması bekleniyor.`
-      );
+      if (tId) {
+        setJoinedBluffTable({
+          tableId: tId,
+          hostId: hostInfo.id,
+          hostName: hostInfo.name,
+          memberNames: [hostInfo.name, cleanMyName],
+          status: "waiting",
+        });
+      } else {
+        showNotice(
+          "Blöf Masasına Katıldın",
+          `${hostInfo.name} masasında diğer oyuncuların katılımı ve oyunun başlatılması bekleniyor.`
+        );
+      }
       return;
     }
 
@@ -1942,6 +2109,13 @@ export default function App() {
       update(ref(dbRef.current, `invites/${myId}`), { status: "declined", ts: Date.now() });
     }
     setIncomingInvite(null);
+  }
+
+  function leaveJoinedBluffTable() {
+    if (dbRef.current && joinedBluffTable?.tableId) {
+      remove(ref(dbRef.current, `bluff_tables/${joinedBluffTable.tableId}/members/${myId}`));
+    }
+    setJoinedBluffTable(null);
   }
 
   function confirmLeaveMatchToLobby() {
@@ -2007,6 +2181,7 @@ export default function App() {
     setMatchDrawerOpen(false);
     sendGameInvite(targetOpp, gameType);
   }
+
   // Blöf oyuncu aksiyonları
   function handleBluffSelectSecretWord(chosenWord) {
     if (!bluffState || bluffState.phase !== "selecting_word" || bluffState.starterId !== myId) return;
@@ -4001,7 +4176,34 @@ export default function App() {
           </div>
         )}
 
-        {/* Blöf Çoklu Davet & Masa Bekleme Ekranı */}
+        {/* Davet edilen oyuncu için Blöf masası bekleme kartı */}
+        {joinedBluffTable && (
+          <section className="bg-emerald-950/65 border border-emerald-400/50 rounded-2xl p-4 space-y-3 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-extrabold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+                <Users className="w-4 h-4" />
+                Blöf Masasındasın
+              </div>
+              <button
+                onClick={leaveJoinedBluffTable}
+                className="px-2.5 py-1 rounded-lg bg-slate-900/80 text-[11px] font-semibold text-rose-300"
+              >
+                Masadan Ayrıl
+              </button>
+            </div>
+            <p className="text-xs text-white">
+              <strong>{joinedBluffTable.hostName}</strong> oyunu başlattığında otomatik olarak Blöf maçına geçiş yapacaksın.
+            </p>
+            <div className="bg-slate-950/80 border border-emerald-500/30 rounded-xl p-2.5 text-xs text-emerald-200">
+              Masadaki Oyuncular:{" "}
+              <span className="text-white font-bold">
+                {(joinedBluffTable.memberNames || [joinedBluffTable.hostName, nickname.trim()]).join(", ")}
+              </span>
+            </div>
+          </section>
+        )}
+
+        {/* Blöf Çoklu Davet & Masa Bekleme Ekranı (Masa Kurucu) */}
         {bluffLobbyOpen && (
           <section className="bg-indigo-950/55 border border-indigo-400/50 rounded-2xl p-4 space-y-3.5 shadow-xl">
             <div className="flex items-center justify-between">
@@ -4011,15 +4213,11 @@ export default function App() {
                   Blöf Masası — Oyuncu Davet Et
                 </h2>
                 <p className="text-[11px] text-indigo-200/85">
-                  Diğer kişilere de davet gönderebilirsin. Başlat dediğinde 3 kişiden azsa eksik kısım botla tamamlanır.
+                  Daveti kabul eden herkes masada görünür. Başlat dediğinde masadaki tüm oyuncularla oyun aynı anda açılır.
                 </p>
               </div>
               <button
-                onClick={() => {
-                  setBluffLobbyOpen(false);
-                  setBluffInvitedIds({});
-                  setBluffJoinedMembers([]);
-                }}
+                onClick={closeBluffTable}
                 className="p-1.5 rounded-xl bg-slate-900/80 text-slate-300"
               >
                 <X className="w-4 h-4" />
