@@ -39,7 +39,7 @@ const FIREBASE_CONFIG =
     ? window.__FIREBASE_CONFIG__
     : null;
 
-const MESSAGE_TTL_MS = 60 * 60 * 1000; // 1 saat
+const MESSAGE_TTL_MS = 60 * 60 * 1000;
 
 const PRACTICE_GAMES_META = [
   { id: "bluff", name: "Blöf", badge: "3+ Kişi" },
@@ -329,12 +329,6 @@ const BLUFF_FAKE_CLUES = [
 ];
 
 const RPS_TOTAL_ROUNDS = 5;
-
-const RPS_CHOICES = [
-  { id: "rock", emoji: "🪨", label: "Taş" },
-  { id: "paper", emoji: "📄", label: "Kağıt" },
-  { id: "scissors", emoji: "✂️", label: "Makas" },
-];
 
 const FINAL_WORDS = [
   "KALEM", "KİTAP", "DENİZ", "BULUT", "MASAL", "BAHÇE", "ŞEHİR", "MÜZİK",
@@ -961,12 +955,10 @@ export default function App() {
     }
   });
 
-  // Blöf state
   const [bluffState, setBluffState] = useState(null);
   const [bluffClueInput, setBluffClueInput] = useState("");
   const [bluffSelectedSuspect, setBluffSelectedSuspect] = useState(null);
 
-  // Kelimelik state
   const [klBoard, setKlBoard] = useState(() => createInitialKelimelikBoard());
   const [klRack, setKlRack] = useState(() => drawKelimelikRack(7));
   const [klDraftCells, setKlDraftCells] = useState([]);
@@ -979,7 +971,6 @@ export default function App() {
   const [klWinner, setKlWinner] = useState(null);
   const [klLastWordInfo, setKlLastWordInfo] = useState(null);
 
-  // Amiral Battı state
   const [myShipGrid, setMyShipGrid] = useState(() => autoPlaceShips(6));
   const [myShotsOnEnemy, setMyShotsOnEnemy] = useState(() => createEmptyGrid(6));
   const [enemyGridForBot, setEnemyGridForBot] = useState(() => autoPlaceShips(6));
@@ -988,7 +979,6 @@ export default function App() {
   const [bsStatus, setBsStatus] = useState("Sıra sende! Düşman denizinde bir kare seç.");
   const [bsWinner, setBsWinner] = useState(null);
 
-  // Taş Kağıt Makas state
   const [rpsRound, setRpsRound] = useState(1);
   const [rpsMyScore, setRpsMyScore] = useState(0);
   const [rpsOppScore, setRpsOppScore] = useState(0);
@@ -999,12 +989,10 @@ export default function App() {
   const [rpsMatchWinner, setRpsMatchWinner] = useState(null);
   const [rpsHistory, setRpsHistory] = useState([]);
 
-  // Tic Tac Toe state
   const [tttBoard, setTttBoard] = useState(Array(9).fill(""));
   const [tttTurn, setTttTurn] = useState("X");
   const [tttResult, setTttResult] = useState(null);
 
-  // Kelime Bulma state
   const [wordTarget, setWordTarget] = useState(
     () => FINAL_WORDS[Math.floor(Math.random() * FINAL_WORDS.length)]
   );
@@ -1016,7 +1004,6 @@ export default function App() {
   const [wordFinished, setWordFinished] = useState(false);
   const [oppWordProgress, setOppWordProgress] = useState(0);
 
-  // Sudoku state
   const [sudokuIndex, setSudokuIndex] = useState(0);
   const [sudokuBoard, setSudokuBoard] = useState(() =>
     SUDOKU_PUZZLES[0].puzzle.map((r) => [...r])
@@ -3807,7 +3794,7 @@ export default function App() {
               <div>Otomatik temizlenir</div>
             </div>
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
-              <div className="font-semibold text-slate-200">Kayar Listeler</div>
+              <div className="font-semibold text-slate-200">Kayar Şerit</div>
               <div>Puan & Son Online</div>
             </div>
           </div>
@@ -4435,116 +4422,137 @@ export default function App() {
             </div>
           )}
 
-          {/* SADE TAŞ KAĞIT MAKAS EKRANI (1000426916.jpg DÜZENİ) */}
           {activeMatch.gameType === "rps" && (
-            <div className="space-y-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
-                <div className="flex items-center justify-between px-2">
-                  <div className="text-left">
-                    <div className="text-xs text-slate-400">Sen</div>
-                    <div className="text-3xl font-extrabold text-indigo-400 mt-0.5">{rpsMyScore}</div>
-                  </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4 text-center">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>
+                  Sen: <strong className="text-indigo-400 text-base">{rpsMyScore}</strong>
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-200 font-bold">
+                  TUR {rpsRound}/{RPS_TOTAL_ROUNDS}
+                </span>
+                <span>
+                  {activeMatch.opponent.name}:{" "}
+                  <strong className="text-rose-400 text-base">{rpsOppScore}</strong>
+                </span>
+              </div>
 
-                  <span className="px-3.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-extrabold text-slate-200">
-                    TUR {rpsRound}/{RPS_TOTAL_ROUNDS}
-                  </span>
+              <div className="grid grid-cols-5 gap-1.5">
+                {Array.from({ length: RPS_TOTAL_ROUNDS }).map((_, idx) => {
+                  const roundNum = idx + 1;
+                  const hist = rpsHistory.find((h) => h.round === roundNum);
+                  const isCurrent = !rpsMatchWinner && rpsRound === roundNum;
 
-                  <div className="text-right">
-                    <div className="text-xs text-slate-400 truncate max-w-[110px]">
-                      {activeMatch.opponent.name}
-                    </div>
-                    <div className="text-3xl font-extrabold text-rose-400 mt-0.5">{rpsOppScore}</div>
-                  </div>
-                </div>
+                  let boxCls = "bg-slate-950 border-slate-800 text-slate-500";
+                  let mark = "-";
 
-                <div className="grid grid-cols-5 gap-2">
-                  {Array.from({ length: RPS_TOTAL_ROUNDS }).map((_, idx) => {
-                    const roundNum = idx + 1;
-                    const hist = rpsHistory.find((h) => h.round === roundNum);
-                    const isCurrent = !rpsMatchWinner && rpsRound === roundNum;
+                  if (hist) {
+                    const iWonRound =
+                      activeMatch.isBot || activeMatch.isHost
+                        ? hist.resultForP1 === "win"
+                        : hist.resultForP1 === "lose";
+                    const iLostRound =
+                      activeMatch.isBot || activeMatch.isHost
+                        ? hist.resultForP1 === "lose"
+                        : hist.resultForP1 === "win";
 
-                    let boxCls = "bg-slate-950 border-slate-800 text-slate-400";
-                    let mark = "-";
-
-                    if (hist?.resultForP1 === "win") {
+                    if (iWonRound) {
                       boxCls = "bg-emerald-950/70 border-emerald-500/50 text-emerald-300";
                       mark = "✓";
-                    } else if (hist?.resultForP1 === "lose") {
+                    } else if (iLostRound) {
                       boxCls = "bg-rose-950/70 border-rose-500/50 text-rose-300";
                       mark = "✕";
-                    } else if (hist?.resultForP1 === "draw") {
+                    } else {
                       boxCls = "bg-slate-800 border-slate-600 text-slate-300";
                       mark = "=";
-                    } else if (isCurrent) {
-                      boxCls = "bg-indigo-950/60 border-indigo-400 text-white";
-                      mark = "•";
                     }
+                  } else if (isCurrent) {
+                    boxCls = "bg-indigo-950/60 border-indigo-400 text-indigo-200";
+                    mark = "•";
+                  }
 
-                    return (
-                      <div
-                        key={roundNum}
-                        className={`rounded-xl border py-2 text-center transition ${boxCls}`}
-                      >
-                        <div className="text-[11px] font-bold">T{roundNum}</div>
-                        <div className="text-xs font-extrabold mt-0.5">{mark}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <p className="text-center text-sm font-semibold text-white min-h-[1.5rem]">
-                  {rpsRoundText}
-                </p>
-              </div>
-
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5">
-                {!rpsMatchWinner ? (
-                  <div className="grid grid-cols-3 gap-2.5">
-                    {RPS_CHOICES.map((ch) => {
-                      const isSelectedThisRound = rpsMyPick === ch.id;
-                      return (
-                        <button
-                          key={ch.id}
-                          disabled={rpsPhase !== "picking" || Boolean(rpsMyPick)}
-                          onClick={() => handleRPSPick(ch.id)}
-                          className={`py-5 px-2 rounded-2xl border disabled:opacity-50 active:scale-[0.98] transition flex flex-col items-center justify-center gap-2.5 ${
-                            isSelectedThisRound
-                              ? "bg-indigo-600/30 border-indigo-400 text-white"
-                              : "bg-slate-950 hover:bg-slate-800 border-slate-800 text-white"
-                          }`}
-                        >
-                          <span className="text-3xl leading-none">{ch.emoji}</span>
-                          <span className="text-sm font-semibold">{ch.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center space-y-3 py-1">
+                  return (
                     <div
-                      className={`text-base font-extrabold ${
-                        rpsMatchWinner === "me"
-                          ? "text-emerald-400"
-                          : rpsMatchWinner === "draw"
-                          ? "text-amber-300"
-                          : "text-rose-400"
-                      }`}
+                      key={roundNum}
+                      className={`rounded-xl border py-1.5 px-1 text-[11px] font-bold ${boxCls}`}
                     >
-                      {rpsMatchWinner === "me"
-                        ? `SERİYİ KAZANDIN! (${rpsMyScore}-${rpsOppScore}) (+1 Puan)`
-                        : rpsMatchWinner === "draw"
-                        ? `SERİ BERABERE! (${rpsMyScore}-${rpsOppScore})`
-                        : `SERİYİ KAYBETTİN! (${rpsMyScore}-${rpsOppScore})`}
+                      <div>T{roundNum}</div>
+                      <div className="text-xs mt-0.5">{mark}</div>
                     </div>
-                    <button
-                      onClick={() => handleRequestNewMatch("rps")}
-                      className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-extrabold text-white"
-                    >
-                      {activeMatch.isBot ? "Yeni 5 Turluk Seri" : "Yeni Seri Daveti Gönder"}
-                    </button>
-                  </div>
-                )}
+                  );
+                })}
               </div>
+
+              <p className="text-sm font-semibold text-amber-300 min-h-[1.5rem]">{rpsRoundText}</p>
+
+              <div className="grid grid-cols-2 gap-3 bg-slate-950/80 border border-slate-800 rounded-2xl p-3">
+                <div className="space-y-1">
+                  <div className="text-[11px] text-slate-400">Senin Seçimin</div>
+                  <div className="text-3xl">{getRPSEmoji(rpsMyPick)}</div>
+                  <div className="text-xs font-bold text-slate-200">{getRPSLabel(rpsMyPick)}</div>
+                </div>
+                <div className="space-y-1 border-l border-slate-800">
+                  <div className="text-[11px] text-slate-400">{activeMatch.opponent.name}</div>
+                  <div className="text-3xl">
+                    {rpsPhase === "revealing" || rpsPhase === "finished"
+                      ? getRPSEmoji(rpsOppPick)
+                      : rpsOppPick
+                      ? "✅"
+                      : "❔"}
+                  </div>
+                  <div className="text-xs font-bold text-slate-200">
+                    {rpsPhase === "revealing" || rpsPhase === "finished"
+                      ? getRPSLabel(rpsOppPick)
+                      : rpsOppPick
+                      ? "Hazır"
+                      : "Düşünüyor"}
+                  </div>
+                </div>
+              </div>
+
+              {!rpsMatchWinner ? (
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: "rock", emoji: "🪨", label: "Taş" },
+                    { id: "paper", emoji: "📄", label: "Kağıt" },
+                    { id: "scissors", emoji: "✂️", label: "Makas" },
+                  ].map((ch) => (
+                    <button
+                      key={ch.id}
+                      disabled={rpsPhase !== "picking" || Boolean(rpsMyPick)}
+                      onClick={() => handleRPSPick(ch.id)}
+                      className="py-3.5 px-2 rounded-2xl bg-slate-800 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-400 disabled:opacity-45 active:scale-95 transition flex flex-col items-center gap-1"
+                    >
+                      <span className="text-2xl">{ch.emoji}</span>
+                      <span className="text-xs font-bold">{ch.label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-2 pt-1">
+                  <div
+                    className={`text-base font-extrabold ${
+                      rpsMatchWinner === "me"
+                        ? "text-emerald-400"
+                        : rpsMatchWinner === "draw"
+                        ? "text-amber-300"
+                        : "text-rose-400"
+                    }`}
+                  >
+                    {rpsMatchWinner === "me"
+                      ? `SERİYİ KAZANDIN! (${rpsMyScore}-${rpsOppScore}) (+1 Puan)`
+                      : rpsMatchWinner === "draw"
+                      ? `SERİ BERABERE! (${rpsMyScore}-${rpsOppScore})`
+                      : `SERİYİ KAYBETTİN! (${rpsMyScore}-${rpsOppScore})`}
+                  </div>
+                  <button
+                    onClick={() => handleRequestNewMatch("rps")}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                  >
+                    {activeMatch.isBot ? "Yeni 5 Turluk Seri" : "Yeni Seri Daveti Gönder"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -5079,7 +5087,6 @@ export default function App() {
           </div>
         )}
 
-        {/* PRATİK YAP (BOTLA OYNA) - 1000427051.jpg SADE DÜZEN */}
         <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
@@ -5103,7 +5110,6 @@ export default function App() {
           </div>
         </section>
 
-        {/* AKTİF OYUNCULAR */}
         <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
@@ -5198,20 +5204,20 @@ export default function App() {
           </div>
         </section>
 
-        {/* EN ÇOK KAZANANLAR (İLK 5) - SOLDAN SAĞA KAYAR ŞERİT */}
+        {/* EN ÇOK KAZANANLAR (İLK 5) - YATAY KAYAR ŞERİT */}
         <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xs font-extrabold text-white">
               En Çok Kazananlar (İlk 5)
             </h2>
-            <span className="text-[11px] text-slate-400">Online olmasalar bile görünür</span>
+            <span className="text-[11px] text-slate-400">Kaydır →</span>
           </div>
 
-          <div className="flex gap-2 overflow-x-auto pb-0.5 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex gap-2 overflow-x-auto pb-0.5 snap-x snap-mandatory touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {topFiveWinners.map((player, idx) => (
               <div
                 key={player.id}
-                className="min-w-[144px] snap-start shrink-0 bg-slate-950/80 border border-slate-800/90 rounded-xl px-3 py-2 flex flex-col justify-between gap-1.5"
+                className="min-w-[146px] snap-start shrink-0 bg-slate-950/85 border border-slate-800/90 rounded-xl px-3 py-2 flex flex-col justify-between gap-1.5"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span
@@ -5249,21 +5255,21 @@ export default function App() {
           </div>
         </section>
 
-        {/* SON ONLINE OLANLAR (İLK 5) - SOLDAN SAĞA KAYAR ŞERİT */}
+        {/* SON ONLINE OLANLAR (İLK 5) - YATAY KAYAR ŞERİT */}
         <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xs font-extrabold text-white flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-sky-400" />
               Son Online Olanlar (İlk 5)
             </h2>
-            <span className="text-[11px] text-slate-400">Güncel aktivite</span>
+            <span className="text-[11px] text-slate-400">Kaydır →</span>
           </div>
 
-          <div className="flex gap-2 overflow-x-auto pb-0.5 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex gap-2 overflow-x-auto pb-0.5 snap-x snap-mandatory touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {lastFiveOnlinePlayers.map((player, idx) => (
               <div
                 key={`recent_${player.id}`}
-                className="min-w-[138px] snap-start shrink-0 bg-slate-950/80 border border-slate-800/90 rounded-xl px-3 py-2"
+                className="min-w-[140px] snap-start shrink-0 bg-slate-950/85 border border-slate-800/90 rounded-xl px-3 py-2"
               >
                 <div className="text-xs font-semibold text-white truncate">
                   {idx + 1}. {player.name} {player.isMe ? "(Sen)" : ""}
@@ -5361,7 +5367,6 @@ export default function App() {
           </section>
         )}
 
-        {/* BÜYÜTÜLMÜŞ GENEL LOBİ SOHBETİ */}
         <section className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden">
           <button
             onClick={() => {
@@ -5588,7 +5593,7 @@ export default function App() {
                 <h3 className="text-base font-extrabold text-white">
                   {reportTargetUser.name} Kullanıcısını Şikayet Et
                 </h3>
-                <p className="text-xs text-slate-400">Şikayet kaydı FD yönetimine gönderilir.</p>
+                <p className="text-xs text-slate-400">Şikayet kaydı FD yönetimine iletilir.</p>
               </div>
               <button
                 type="button"
@@ -5601,18 +5606,18 @@ export default function App() {
 
             <textarea
               rows={3}
-              maxLength={180}
+              maxLength={200}
               value={reportReason}
               onChange={(e) => setReportReason(e.target.value)}
-              placeholder="Şikayet nedenini kısaça yazın..."
-              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+              placeholder="Şikayet sebebini kısaca yazın..."
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
             />
 
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setReportTargetUser(null)}
-                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200"
+                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300"
               >
                 İptal
               </button>
@@ -5620,7 +5625,7 @@ export default function App() {
                 type="submit"
                 className="py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-xs font-bold text-white"
               >
-                Şikayet Et
+                Şikayet Gönder
               </button>
             </div>
           </form>
@@ -5633,20 +5638,35 @@ export default function App() {
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
               <div>
                 <h3 className="text-sm font-extrabold text-white">{dmTarget.name}</h3>
-                <p className="text-[11px] text-slate-400">Özel Mesaj • 1 saat sonra silinir</p>
+                <p className="text-[11px] text-slate-400">Özel Mesaj (1 saat sonra silinir)</p>
               </div>
-              <button
-                onClick={() => setDmTarget(null)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                {dmTarget.status !== "in_game" && (
+                  <button
+                    onClick={() => {
+                      const peer = dmTarget;
+                      setDmTarget(null);
+                      setSelectedGameForInvite("kelimelik");
+                      setSelectedTargetUser(peer);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-indigo-600/25 border border-indigo-500/40 text-[11px] font-bold text-indigo-300"
+                  >
+                    Oyuna Davet
+                  </button>
+                )}
+                <button
+                  onClick={() => setDmTarget(null)}
+                  className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            <div className="max-h-64 min-h-[140px] overflow-y-auto space-y-2 pr-1">
+            <div className="h-60 overflow-y-auto space-y-2 pr-1">
               {activeDmList.length === 0 ? (
-                <div className="text-xs text-slate-500 text-center py-8">
-                  Henüz mesaj yok. İlk mesajı sen gönder!
+                <div className="h-full flex items-center justify-center text-xs text-slate-500">
+                  Henüz özel mesaj yok. İlk mesajı sen gönder!
                 </div>
               ) : (
                 activeDmList.map((m) => {
@@ -5656,9 +5676,6 @@ export default function App() {
                       key={m.id}
                       className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
                     >
-                      <span className="text-[10px] text-slate-500 px-1">
-                        {mine ? "Sen" : m.senderName}
-                      </span>
                       <div
                         className={`px-3 py-2 rounded-2xl text-xs max-w-[82%] ${
                           mine
@@ -5674,7 +5691,7 @@ export default function App() {
               )}
             </div>
 
-            <form onSubmit={handleSendDirectMessage} className="flex items-center gap-2 pt-1">
+            <form onSubmit={handleSendDirectMessage} className="flex gap-2 pt-1">
               <input
                 type="text"
                 value={dmInput}
@@ -5684,7 +5701,7 @@ export default function App() {
               />
               <button
                 type="submit"
-                className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
+                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
               >
                 <Send className="w-4 h-4" />
               </button>
