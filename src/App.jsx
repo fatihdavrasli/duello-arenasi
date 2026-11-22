@@ -43,7 +43,7 @@ const FIREBASE_CONFIG =
 const MESSAGE_TTL_MS = 60 * 60 * 1000;
 
 const PRACTICE_GAMES_META = [
-  { id: "bluff", name: "Blöf", badge: "3+ Kişi" },
+  { id: "bluff", name: "Blöf", badge: "3-6 Kişi" },
   { id: "battleship", name: "Amiral Battı", badge: "Strateji" },
   { id: "rps", name: "Taş Kağıt Makas", badge: "5 Tur" },
   { id: "ttt", name: "Tic Tac Toe", badge: "Klasik" },
@@ -55,7 +55,7 @@ const PRACTICE_GAMES_META = [
 
 const ALL_GAMES_LOOKUP = [
   { id: "kelimelik", name: "Kelimelik", badge: "Kelime" },
-  { id: "bluff", name: "Blöf", badge: "3+ Kişi" },
+  { id: "bluff", name: "Blöf", badge: "3-6 Kişi" },
   { id: "battleship", name: "Amiral Battı", badge: "Strateji" },
   { id: "rps", name: "Taş Kağıt Makas", badge: "5 Tur" },
   { id: "ttt", name: "Tic Tac Toe", badge: "Klasik" },
@@ -2116,7 +2116,9 @@ export default function App() {
     const membersRef = ref(dbRef.current, `bluff_tables/${bluffTableId}/members`);
     const unsub = onValue(membersRef, (snap) => {
       const val = snap.val() || {};
-      const joinedList = Object.values(val).filter((m) => m && m.id && m.id !== myId);
+      const joinedList = Object.values(val)
+        .filter((m) => m && m.id && m.id !== myId)
+        .slice(0, 5);
       setBluffJoinedMembers(joinedList);
       setBluffInvitedIds((prev) => {
         const next = { ...prev };
@@ -2133,25 +2135,42 @@ export default function App() {
     const invitedEntries = Object.entries(bluffInvitedIds || {});
     if (invitedEntries.length === 0) return;
 
-    if (!dbRef.current) {
-      const pendingIds = invitedEntries.filter(([, st]) => st === "pending").map(([id]) => id);
-      if (pendingIds.length === 0) return;
-      const timer = setTimeout(() => {
-        pendingIds.forEach((uid) => {
-          const found = activeLobbyPlayers.find((u) => u.id === uid);
-          if (found) {
-            setBluffInvitedIds((prev) => ({ ...prev, [uid]: "accepted" }));
-            setBluffJoinedMembers((prev) =>
-              prev.some((m) => m.id === found.id) ? prev : [...prev, { id: found.id, name: found.name }]
-            );
-          }
+    const pendingBotIds = invitedEntries
+      .filter(([uid, st]) => st === "pending" && LOBBY_BOT_ID_SET.has(uid))
+      .map(([uid]) => uid);
+
+    let botJoinTimer = null;
+    if (pendingBotIds.length > 0) {
+      botJoinTimer = setTimeout(() => {
+        setBluffJoinedMembers((prev) => {
+          const next = [...prev];
+          pendingBotIds.forEach((uid) => {
+            if (next.length >= 5) return;
+            const found = activeLobbyPlayers.find((u) => u.id === uid);
+            if (found && !next.some((m) => m.id === found.id)) {
+              next.push({ id: found.id, name: found.name, isBot: true });
+            }
+          });
+          return next;
         });
-      }, 1200);
-      return () => clearTimeout(timer);
+        setBluffInvitedIds((prev) => {
+          const next = { ...prev };
+          pendingBotIds.forEach((uid) => {
+            next[uid] = "accepted";
+          });
+          return next;
+        });
+      }, 650);
+    }
+
+    if (!dbRef.current) {
+      return () => {
+        if (botJoinTimer) clearTimeout(botJoinTimer);
+      };
     }
 
     const unsubs = invitedEntries.map(([uid, status]) => {
-      if (status !== "pending") return () => {};
+      if (status !== "pending" || LOBBY_BOT_ID_SET.has(uid)) return () => {};
       const invRef = ref(dbRef.current, `invites/${uid}`);
       return onValue(invRef, (snap) => {
         const val = snap.val();
@@ -2159,9 +2178,9 @@ export default function App() {
         if (val.status === "accepted") {
           setBluffInvitedIds((prev) => ({ ...prev, [uid]: "accepted" }));
           setBluffJoinedMembers((prev) =>
-            prev.some((m) => m.id === uid)
+            prev.some((m) => m.id === uid) || prev.length >= 5
               ? prev
-              : [...prev, { id: uid, name: val.acceptedByName || val.toName || "Oyuncu" }]
+              : [...prev, { id: uid, name: val.acceptedByName || val.toName || "Oyuncu", isBot: false }]
           );
           remove(invRef);
         } else if (val.status === "declined") {
@@ -2172,6 +2191,7 @@ export default function App() {
     });
 
     return () => {
+      if (botJoinTimer) clearTimeout(botJoinTimer);
       unsubs.forEach((fn) => fn && fn());
     };
   }, [bluffInvitedIds, activeLobbyPlayers, myId]);
@@ -2516,9 +2536,14 @@ export default function App() {
 
   function sendBluffInviteToUser(targetUser) {
     if (!targetUser || !targetUser.id || targetUser.status === "in_game") return;
+    const totalInvitedOrJoined = Object.values(bluffInvitedIds).filter(
+      (st) => st === "pending" || st === "accepted"
+    ).length;
+    if (totalInvitedOrJoined >= 5) return;
     if (bluffInvitedIds[targetUser.id] === "pending" || bluffInvitedIds[targetUser.id] === "accepted") {
       return;
     }
+
     const activeTableId = bluffTableId || `bt_${myId}_${Date.now()}`;
     if (!bluffTableId) {
       setBluffTableId(activeTableId);
@@ -2537,7 +2562,7 @@ export default function App() {
     }
 
     setBluffInvitedIds((prev) => ({ ...prev, [targetUser.id]: "pending" }));
-    if (dbRef.current && !targetUser.isBot) {
+    if (dbRef.current && !targetUser.isBot && !LOBBY_BOT_ID_SET.has(targetUser.id)) {
       set(ref(dbRef.current, `invites/${targetUser.id}`), {
         fromId: myId,
         fromName: nickname.trim(),
@@ -2553,31 +2578,55 @@ export default function App() {
     }
   }
 
-  function buildBluffParticipantsFromTable(customHumanMembers = null) {
+  function removeBluffSelectedMember(memberId) {
+    setBluffJoinedMembers((prev) => prev.filter((m) => m.id !== memberId));
+    setBluffInvitedIds((prev) => {
+      const next = { ...prev };
+      delete next[memberId];
+      return next;
+    });
+    if (dbRef.current && bluffTableId) {
+      remove(ref(dbRef.current, `bluff_tables/${bluffTableId}/members/${memberId}`));
+      remove(ref(dbRef.current, `invites/${memberId}`));
+    }
+  }
+
+  function buildBluffParticipantsFromTable(customMembers = null) {
     const cleanMyName = nickname.trim() || "Sen";
     const list = [{ id: myId, name: cleanMyName, isBot: false, score: 0 }];
-    const humans = customHumanMembers !== null ? customHumanMembers : bluffJoinedMembers;
-    humans.forEach((m) => {
+    const selectedMembers = customMembers !== null ? customMembers : bluffJoinedMembers;
+
+    selectedMembers.slice(0, 5).forEach((m) => {
       if (m && m.id && m.id !== myId && !list.some((x) => x.id === m.id)) {
-        list.push({ id: m.id, name: m.name, isBot: false, score: 0 });
+        list.push({
+          id: m.id,
+          name: m.name,
+          isBot: Boolean(m.isBot || LOBBY_BOT_ID_SET.has(m.id)),
+          score: 0,
+        });
       }
     });
 
-    const botPool = LOBBY_BOT_PLAYERS.slice(0, 3).map((b) => ({
-      id: b.id,
-      name: b.name,
-      isBot: true,
-      score: 0,
-    }));
-    let idx = 0;
-    while (list.length < 3 && idx < botPool.length) {
-      list.push(botPool[idx]);
-      idx++;
+    if (list.length < 3) {
+      const botPool = LOBBY_BOT_PLAYERS.map((b) => ({
+        id: b.id,
+        name: b.name,
+        isBot: true,
+        score: 0,
+      }));
+      let idx = 0;
+      while (list.length < 3 && idx < botPool.length) {
+        if (!list.some((x) => x.id === botPool[idx].id)) {
+          list.push(botPool[idx]);
+        }
+        idx++;
+      }
     }
     return list;
   }
 
   function handleStartBluffFromTable() {
+    if (bluffJoinedMembers.length < 2 || bluffJoinedMembers.length > 5) return;
     const participants = buildBluffParticipantsFromTable(bluffJoinedMembers);
     const hasOnlyBotsAsOthers = participants.every((p) => p.id === myId || p.isBot);
     const firstOpp =
@@ -2720,13 +2769,15 @@ export default function App() {
     setSudokuWinner(null);
     setOppSudokuProgress(0);
 
-    const existingHumans =
+    const existingOtherPlayers =
       bluffState && Array.isArray(bluffState.players)
-        ? bluffState.players.filter((p) => !p.isBot && p.id !== myId).map((p) => ({ id: p.id, name: p.name }))
+        ? bluffState.players
+            .filter((p) => p.id !== myId)
+            .map((p) => ({ id: p.id, name: p.name, isBot: Boolean(p.isBot) }))
         : !isBotMatch && opponentObj && opponentObj.id && !LOBBY_BOT_ID_SET.has(opponentObj.id)
-        ? [{ id: opponentObj.id, name: opponentObj.name }]
+        ? [{ id: opponentObj.id, name: opponentObj.name, isBot: false }]
         : [];
-    const participants = buildBluffParticipantsFromTable(existingHumans);
+    const participants = buildBluffParticipantsFromTable(existingOtherPlayers);
     const initialBluff = createInitialBluffState(participants, 1, {});
     setBluffState(initialBluff);
     setBluffClueInput("");
@@ -3028,7 +3079,7 @@ export default function App() {
     if (restored.gameType === "bluff" && !bluffState) {
       const participants = buildBluffParticipantsFromTable(
         !restored.isBot && restored.opponent?.id && !LOBBY_BOT_ID_SET.has(restored.opponent.id)
-          ? [{ id: restored.opponent.id, name: restored.opponent.name }]
+          ? [{ id: restored.opponent.id, name: restored.opponent.name, isBot: false }]
           : []
       );
       setBluffState(createInitialBluffState(participants, 1, {}));
@@ -3874,14 +3925,14 @@ export default function App() {
 
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-5 select-none">
-        <div className="max-w-md w-full mx-auto my-auto space-y-6">
+        <div className="max-w-md w-full mx-auto my-auto space-y-5">
           <div className="text-center space-y-2">
             <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 mb-1">
               <Gamepad2 className="w-8 h-8" />
             </div>
             <h1 className="text-3xl font-extrabold tracking-tight text-white">Düello Arenası</h1>
             <p className="text-sm text-slate-400">
-              Aktif oyuncularla eşleş, sohbet et ve botlarla pratik yap.
+              Çevrimiçi oyuncularla düello at, canlı sohbet et ve botlarla pratik yap.
             </p>
           </div>
 
@@ -3955,18 +4006,51 @@ export default function App() {
             </button>
           </form>
 
-          <div className="grid grid-cols-3 gap-2 text-center text-xs text-slate-400">
-            <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
-              <div className="font-semibold text-slate-200">Pratik Modu</div>
-              <div>Botla anında başla</div>
+          <div className="bg-slate-900/75 border border-slate-800/90 rounded-2xl p-3.5 space-y-3">
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              {[
+                "Blöf",
+                "Amiral Battı",
+                "Kelimelik",
+                "Kelime Bulma",
+                "Taş Kağıt Makas",
+                "Tic Tac Toe",
+                "Sudoku",
+              ].map((gameTitle) => (
+                <span
+                  key={gameTitle}
+                  className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-semibold text-indigo-300"
+                >
+                  {gameTitle}
+                </span>
+              ))}
             </div>
-            <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
-              <div className="font-semibold text-slate-200">1 Saatlik Sohbet</div>
-              <div>Otomatik temizlenir</div>
-            </div>
-            <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
-              <div className="font-semibold text-slate-200">Kayar Şerit</div>
-              <div>Puan & Son Online</div>
+
+            <div className="grid grid-cols-2 gap-2 text-left text-xs">
+              <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl p-2.5">
+                <div className="font-bold text-slate-100">Botlarla Pratik</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Beklemeden istediğin oyunda anında başla
+                </div>
+              </div>
+              <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl p-2.5">
+                <div className="font-bold text-slate-100">Canlı & Özel Sohbet</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Lobi, oyun içi sohbet ve DM ile iletişim kur
+                </div>
+              </div>
+              <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl p-2.5">
+                <div className="font-bold text-slate-100">Hızlı Eşleşme</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Tek dokunuşla rastgele rakip ve oyun bul
+                </div>
+              </div>
+              <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl p-2.5">
+                <div className="font-bold text-slate-100">Liderlik & Puan</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Galibiyetlerle puan topla, zirveye yerleş
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -5409,7 +5493,6 @@ export default function App() {
             <h2 className="text-xs font-extrabold text-white">
               En Çok Kazananlar (İlk 5)
             </h2>
-            <span className="text-[11px] text-slate-400">Otomatik Akış</span>
           </div>
 
           <AutoMarqueeRow speed={0.55}>
@@ -5460,7 +5543,6 @@ export default function App() {
               <Clock className="w-3.5 h-3.5 text-sky-400" />
               Son Online Olanlar (İlk 5)
             </h2>
-            <span className="text-[11px] text-slate-400">Otomatik Akış</span>
           </div>
 
           <AutoMarqueeRow speed={0.5}>
@@ -5530,12 +5612,12 @@ export default function App() {
                       </button>
                       <button
                         onClick={() => {
-                          setReportsList((prev) => prev.filter((x) => x.id !== rep.id));
+                          setReportsList((prev) => prev.filter((r) => r.id !== rep.id));
                           if (dbRef.current) remove(ref(dbRef.current, `reports/${rep.id}`));
                         }}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-[11px]"
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px]"
                       >
-                        Kapat
+                        Şikayeti Sil
                       </button>
                     </div>
                   </div>
@@ -5544,17 +5626,17 @@ export default function App() {
             </div>
 
             {Object.keys(bannedUsers).length > 0 && (
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 pt-1 border-t border-amber-500/20">
                 <div className="text-xs font-bold text-slate-300">Engellenen Kullanıcılar</div>
                 {Object.values(bannedUsers).map((b) => (
                   <div
                     key={b.id}
                     className="flex items-center justify-between bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-xs"
                   >
-                    <span className="text-rose-300 font-semibold">{b.name}</span>
+                    <span className="text-slate-200 font-semibold">{b.name}</span>
                     <button
                       onClick={() => handleUnbanUser(b.id)}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-emerald-300"
+                      className="px-2.5 py-1 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold"
                     >
                       Engeli Kaldır
                     </button>
@@ -5571,52 +5653,58 @@ export default function App() {
               setGlobalChatOpen((o) => !o);
               setGlobalUnread(0);
             }}
-            className="w-full px-4 py-3 flex items-center justify-between text-sm font-bold text-white"
+            className="w-full px-4 py-3 flex items-center justify-between text-left"
           >
-            <span className="flex items-center gap-2">
+            <span className="text-sm font-bold text-white flex items-center gap-2">
               <MessageCircle className="w-4 h-4 text-indigo-400" />
               Genel Lobi Sohbeti
+              <span className="text-[10px] font-normal text-slate-400">(1 sa otomatik silinir)</span>
               {globalUnread > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-[11px] text-white">
+                <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-[10px] text-white">
                   {globalUnread}
                 </span>
               )}
             </span>
-            {globalChatOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            {globalChatOpen ? (
+              <ChevronUp className="w-4 h-4 text-slate-400" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-slate-400" />
+            )}
           </button>
 
           {globalChatOpen && (
-            <div className="px-4 pb-4 space-y-3 border-t border-slate-800/80 pt-3">
-              <div className="max-h-80 min-h-[200px] overflow-y-auto space-y-2 pr-1">
+            <div className="px-3.5 pb-3.5 space-y-2.5 border-t border-slate-800/80 pt-2.5">
+              <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
                 {visibleGlobalMessages.map((m) => {
                   const mine = m.senderId === myId;
-                  const canDelete = isFdAdmin && m.senderId !== "sys";
                   return (
                     <div
                       key={m.id}
-                      className={`text-xs rounded-xl px-3 py-2 flex items-start justify-between gap-2 ${
-                        m.senderId === "sys"
-                          ? "bg-indigo-950/40 text-indigo-200 border border-indigo-500/20"
-                          : mine
-                          ? "bg-indigo-600/25 text-white border border-indigo-500/30"
-                          : "bg-slate-950 text-slate-200 border border-slate-800"
-                      }`}
+                      className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
                     >
-                      <div className="min-w-0">
-                        <span className="font-bold text-indigo-300 mr-1.5">
-                          {mine ? `${m.senderName} (Sen)` : m.senderName}:
+                      <div className="flex items-center gap-1.5 px-1">
+                        <span className="text-[10px] text-slate-500">
+                          {mine ? "Sen" : m.senderName}
                         </span>
-                        <span className="break-words">{m.text}</span>
+                        {isFdAdmin && m.senderId !== "sys" && (
+                          <button
+                            onClick={() => handleDeleteGlobalMessage(m)}
+                            className="text-rose-400 hover:text-rose-300"
+                            title="Mesajı Sil"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
-                      {canDelete && (
-                        <button
-                          onClick={() => handleDeleteGlobalMessage(m)}
-                          className="p-1 rounded-lg bg-rose-950/70 hover:bg-rose-600 text-rose-300 hover:text-white shrink-0"
-                          title="Mesajı Sil"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <div
+                        className={`px-3 py-1.5 rounded-2xl text-xs max-w-[85%] ${
+                          mine
+                            ? "bg-indigo-600 text-white rounded-br-sm"
+                            : "bg-slate-800 text-slate-100 rounded-bl-sm"
+                        }`}
+                      >
+                        {m.text}
+                      </div>
                     </div>
                   );
                 })}
@@ -5627,8 +5715,8 @@ export default function App() {
                   type="text"
                   value={globalInput}
                   onChange={(e) => setGlobalInput(e.target.value)}
-                  placeholder="Lobiye mesaj yaz..."
-                  className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  placeholder="Lobideki herkese yaz..."
+                  className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
                 <button
                   type="submit"
@@ -5643,18 +5731,18 @@ export default function App() {
       </main>
 
       {bluffLobbyOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-base font-extrabold text-white">Blöf Masası Kur</h3>
                 <p className="text-xs text-slate-400">
-                  Katılan oyuncular: 1 (Sen) + {bluffJoinedMembers.length} kişi (Eksik kalanlar botlarla tamamlanır)
+                  En az 2, en fazla 5 kişi veya bot seç ({bluffJoinedMembers.length}/5 seçili)
                 </p>
               </div>
               <button
                 onClick={closeBluffTable}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
+                className="p-2 rounded-xl bg-slate-800 text-slate-300"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -5665,77 +5753,100 @@ export default function App() {
                 {nickname.trim()} (Sen)
               </span>
               {bluffJoinedMembers.map((m) => (
-                <span
+                <button
                   key={m.id}
-                  className="px-2.5 py-1 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-xs font-bold text-emerald-300"
+                  onClick={() => removeBluffSelectedMember(m.id)}
+                  title="Masadan çıkar"
+                  className="px-2.5 py-1 rounded-full bg-emerald-600/25 border border-emerald-400/50 text-xs font-bold text-emerald-200 flex items-center gap-1"
                 >
-                  {m.name} (Katıldı)
-                </span>
+                  <span>{m.name}</span>
+                  <X className="w-3 h-3 opacity-80" />
+                </button>
               ))}
             </div>
 
-            <div className="space-y-2">
-              <div className="text-xs font-bold text-slate-300">Masanın Oyuncularına Davet Gönder</div>
-              {activeLobbyPlayers.map((u) => {
-                const invStatus = bluffInvitedIds[u.id];
-                const isJoined = bluffJoinedMembers.some((m) => m.id === u.id);
-                return (
-                  <div
-                    key={u.id}
-                    className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl px-3 py-2"
-                  >
-                    <div className="text-xs font-semibold text-white">
-                      {u.name}{" "}
-                      <span className="text-[11px] text-slate-400">
-                        ({u.status === "in_game" ? "Oyunda" : u.isBot ? "Bot" : "Çevrim içi"})
-                      </span>
-                    </div>
-                    {isJoined || invStatus === "accepted" ? (
-                      <span className="text-[11px] font-bold text-emerald-400">Masada</span>
-                    ) : invStatus === "pending" ? (
-                      <span className="text-[11px] font-bold text-amber-300">Davet Gönderildi</span>
-                    ) : invStatus === "declined" ? (
-                      <button
-                        onClick={() => sendBluffInviteToUser(u)}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-600 text-[11px] font-bold text-slate-200 hover:text-white"
+            <div className="space-y-2 max-h-56 overflow-y-auto">
+              <div className="text-xs font-bold text-slate-300">
+                Oyuncu veya Bot Seç ({bluffJoinedMembers.length}/5)
+              </div>
+              {activeLobbyPlayers.filter((u) => u.status !== "in_game").length === 0 ? (
+                <p className="text-xs text-slate-400 bg-slate-950 border border-slate-800 rounded-xl p-3">
+                  Şu an müsait oyuncu yok.
+                </p>
+              ) : (
+                activeLobbyPlayers
+                  .filter((u) => u.status !== "in_game")
+                  .map((u) => {
+                    const invState = bluffInvitedIds[u.id];
+                    const totalSelectedOrPending = Object.values(bluffInvitedIds).filter(
+                      (st) => st === "pending" || st === "accepted"
+                    ).length;
+                    const maxReached = totalSelectedOrPending >= 5;
+                    return (
+                      <div
+                        key={u.id}
+                        className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs"
                       >
-                        Tekrar Davet Et
-                      </button>
-                    ) : (
-                      <button
-                        disabled={u.status === "in_game"}
-                        onClick={() => sendBluffInviteToUser(u)}
-                        className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-[11px] font-bold text-white"
-                      >
-                        Davet Et
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-white">{u.name}</span>
+                          {u.isBot && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                              Bot
+                            </span>
+                          )}
+                        </div>
+                        {invState === "accepted" ? (
+                          <button
+                            onClick={() => removeBluffSelectedMember(u.id)}
+                            className="text-emerald-400 font-bold hover:text-rose-300"
+                          >
+                            Seçildi ✕
+                          </button>
+                        ) : invState === "pending" ? (
+                          <span className="text-amber-300 font-semibold">Ekleniyor...</span>
+                        ) : (
+                          <button
+                            disabled={maxReached}
+                            onClick={() => sendBluffInviteToUser(u)}
+                            className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold"
+                          >
+                            Seç / Davet Et
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+              )}
             </div>
 
+            {bluffJoinedMembers.length < 2 && (
+              <p className="text-[11px] text-amber-300 text-center font-medium">
+                Oyunu başlatmak için en az {2 - bluffJoinedMembers.length} kişi/bot daha seçmelisin.
+              </p>
+            )}
+
             <button
+              disabled={bluffJoinedMembers.length < 2 || bluffJoinedMembers.length > 5}
               onClick={handleStartBluffFromTable}
-              className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-extrabold text-sm text-white shadow-lg"
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-extrabold text-white shadow-lg"
             >
-              Oyunu Başlat ({buildBluffParticipantsFromTable(bluffJoinedMembers).length} Oyuncu)
+              Oyunu Başlat ({1 + bluffJoinedMembers.length} Oyuncu)
             </button>
           </div>
         </div>
       )}
 
       {selectedTargetUser && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-bold text-white">{selectedTargetUser.name}</h3>
-                <p className="text-xs text-slate-400">Oyun seç ve davet gönder</p>
+                <h3 className="text-base font-extrabold text-white">{selectedTargetUser.name}</h3>
+                <p className="text-xs text-slate-400">Oynamak istediğin oyunu seç</p>
               </div>
               <button
                 onClick={() => setSelectedTargetUser(null)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
+                className="p-2 rounded-xl bg-slate-800 text-slate-300"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -5748,25 +5859,42 @@ export default function App() {
                   <button
                     key={g.id}
                     onClick={() => setSelectedGameForInvite(g.id)}
-                    className={`p-3 rounded-xl border text-left transition ${
+                    className={`p-3 rounded-2xl border text-left transition ${
                       active
                         ? "bg-indigo-600/25 border-indigo-400 text-white"
-                        : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
+                        : "bg-slate-950 border-slate-800 text-slate-300"
                     }`}
                   >
                     <div className="text-xs font-bold">{g.name}</div>
-                    <div className="text-[11px] text-slate-400">{g.badge}</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">{g.badge}</div>
                   </button>
                 );
               })}
             </div>
 
-            <button
-              onClick={() => sendGameInvite(selectedTargetUser, selectedGameForInvite)}
-              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-sm text-white"
-            >
-              {selectedGameForInvite === "bluff" ? "Blöf Masası Kur" : "Davet Gönder"}
-            </button>
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              <button
+                onClick={() => {
+                  const target = selectedTargetUser;
+                  setSelectedTargetUser(null);
+                  openDirectMessage(target);
+                }}
+                className="py-3 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-xs text-slate-200 flex items-center justify-center gap-1.5"
+              >
+                <MessageCircle className="w-4 h-4 text-indigo-400" />
+                Mesaj At
+              </button>
+              <button
+                onClick={() => sendGameInvite(selectedTargetUser, selectedGameForInvite)}
+                className="py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-xs text-white"
+              >
+                {selectedGameForInvite === "bluff"
+                  ? "Blöf Masası Aç"
+                  : selectedTargetUser.isBot
+                  ? "Oyunu Başlat"
+                  : "Davet Gönder"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -5778,40 +5906,43 @@ export default function App() {
             className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl"
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-white">
-                {reportTargetUser.name} Kullanıcısını Şikayet Et
-              </h3>
+              <div>
+                <h3 className="text-base font-extrabold text-white">Kullanıcıyı Şikayet Et</h3>
+                <p className="text-xs text-slate-400">
+                  Şikayet edilen: <strong className="text-amber-300">{reportTargetUser.name}</strong>
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setReportTargetUser(null)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
+                className="p-2 rounded-xl bg-slate-800 text-slate-300"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <input
-              type="text"
-              maxLength={140}
+            <textarea
+              rows={3}
+              maxLength={200}
               value={reportReason}
               onChange={(e) => setReportReason(e.target.value)}
-              placeholder="Şikayet sebebini yazın (örn: hakaret, spam)..."
-              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+              placeholder="Şikayet sebebini kısaca yazın (örn: küfür, spam, uygunsuz davranış)..."
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
             />
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <button
                 type="button"
                 onClick={() => setReportTargetUser(null)}
-                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200"
+                className="py-2.5 rounded-xl bg-slate-800 text-xs font-bold text-slate-300"
               >
-                İptal
+                Vazgeç
               </button>
               <button
                 type="submit"
-                className="py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-extrabold text-slate-950"
+                className="py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-xs font-bold text-white"
               >
-                Yönetime Gönder
+                FD Yönetimine Bildir
               </button>
             </div>
           </form>
@@ -5823,8 +5954,10 @@ export default function App() {
           <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-4 space-y-3 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
               <div>
-                <h3 className="text-sm font-bold text-white">{dmTarget.name}</h3>
-                <p className="text-[11px] text-slate-400">Özel Mesaj (1 saat sonra silinir)</p>
+                <h3 className="text-sm font-extrabold text-white">{dmTarget.name} ile Özel Sohbet</h3>
+                <p className="text-[11px] text-slate-400">
+                  Çıkış yapana kadar mesajlar korunur (1 sa otomatik temizlenir)
+                </p>
               </div>
               <button
                 onClick={() => setDmTarget(null)}
@@ -5836,9 +5969,9 @@ export default function App() {
 
             <div className="h-56 overflow-y-auto space-y-2 pr-1">
               {activeDmList.length === 0 ? (
-                <div className="text-xs text-slate-500 text-center py-10">
+                <p className="text-xs text-slate-500 text-center py-10">
                   Henüz mesaj yok. İlk mesajı sen gönder!
-                </div>
+                </p>
               ) : (
                 activeDmList.map((m) => {
                   const mine = m.senderId === myId;
@@ -5847,8 +5980,11 @@ export default function App() {
                       key={m.id}
                       className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
                     >
+                      <span className="text-[10px] text-slate-500 px-1">
+                        {mine ? "Sen" : m.senderName}
+                      </span>
                       <div
-                        className={`px-3 py-2 rounded-2xl text-xs max-w-[82%] ${
+                        className={`px-3 py-1.5 rounded-2xl text-xs max-w-[82%] ${
                           mine
                             ? "bg-indigo-600 text-white rounded-br-sm"
                             : "bg-slate-800 text-slate-100 rounded-bl-sm"
@@ -5868,7 +6004,7 @@ export default function App() {
                 value={dmInput}
                 onChange={(e) => setDmInput(e.target.value)}
                 placeholder={`${dmTarget.name} kişisine yaz...`}
-                className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
               />
               <button
                 type="submit"
