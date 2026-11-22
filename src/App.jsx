@@ -86,6 +86,51 @@ const LOBBY_BOT_PLAYERS = [
 
 const LOBBY_BOT_ID_SET = new Set(LOBBY_BOT_PLAYERS.map((b) => b.id));
 
+const BOT_PERSONAS = {
+  bot_efe: {
+    name: "Efe",
+    age: "24",
+    city: "İstanbul",
+    job: "yazılım işleriyle uğraşıyorum",
+    hobby: "akşamları kafa dağıtmak için mini oyunlar ve dizi takılıyorum",
+  },
+  bot_defne: {
+    name: "Defne",
+    age: "22",
+    city: "İzmir",
+    job: "mimarlık okuyorum",
+    hobby: "kahve eşliğinde kelime ve zeka oyunları oynamayı seviyorum",
+  },
+  bot_arda: {
+    name: "Arda",
+    age: "26",
+    city: "Ankara",
+    job: "grafik tasarım yapıyorum",
+    hobby: "müzik dinleyip hızlı düello oyunlarına giriyorum",
+  },
+  bot_elif: {
+    name: "Elif",
+    age: "23",
+    city: "Bursa",
+    job: "öğretmenlik yapıyorum",
+    hobby: "boş vakitlerde arkadaşlarla sohbet ve kelime oyunları oynuyorum",
+  },
+  bot_kuzey: {
+    name: "Kuzey",
+    age: "25",
+    city: "Antalya",
+    job: "mühendislik tarafında çalışıyorum",
+    hobby: "akşamları biraz rekabet olsun diye buraya giriyorum",
+  },
+  bot_mira: {
+    name: "Mira",
+    age: "21",
+    city: "Eskişehir",
+    job: "psikoloji okuyorum",
+    hobby: "ders aralarında hem sohbet edip hem oyun atıyorum",
+  },
+};
+
 const KELIMELIK_SIZE = 7;
 
 const KELIMELIK_BONUS_MAP = {
@@ -381,11 +426,15 @@ const BOT_CHAT_POOLS = {
     "Heyy, nasılsın? Ben de tam yeni el açmıştım.",
     "Selam! Akşamın nasıl geçiyor, dinleniyor musun?",
   ],
+  howAreYou: [
+    "İyiyim sağ ol, kafa dağıtmak için girdim biraz. Senden ne haber?",
+    "Fena değil valla, günün yorgunluğunu atıyorum. Sen nasılsın?",
+    "Gayet iyiyim teşekkürler, sende durumlar nasıl?",
+    "İdare eder diyelim, senin keyfin nasıl?",
+  ],
   warmCasual: [
-    "Haha harbi mi, hiç öyle düşünmemiştim 😄",
     "Bence de ya, bayağı sarıyor şu an.",
     "Aynen öyle, ben de tam onu diyecektim!",
-    "Vayy iyi yakaladın, gözünden kaçmıyor hiç.",
     "Olur olur, hiç acelem yok, rahat takılalım.",
     "Çok iyiymiş, valla keyfim yerine geldi.",
     "Bence bu işin tadı böyle çıkıyor zaten.",
@@ -399,12 +448,6 @@ const BOT_CHAT_POOLS = {
     "Tamam şampiyon, bu eli al bakalım şimdilik 😉",
     "Heyecan yaptırmıyorsun hiç, soğukkanlısın bayağı.",
   ],
-  questionOrCuriosity: [
-    "Valla şu an hem oyuna odaklandım hem muhabbet güzel gidiyor, sen ne yapıyorsun?",
-    "Bence ikisi de mantıklı ama duruma göre değişir, sence?",
-    "Şu an fena değil, senden ne haber, nasıl gidiyor?",
-    "Açıkçası hiç beklemediğim bir yerden geldi, sen ne dersin?",
-  ],
   rematchOrPace: [
     "Biter bitmez bir el daha atarız, sıkıntı yok!",
     "Aynen, rövanş her zaman var, önce şu eli bitirelim.",
@@ -416,36 +459,30 @@ const BOT_CHAT_POOLS = {
       "K2 veya H2 karesi denk gelirse skor bir anda değişir.",
       "Elimdeki harflerle güzel bir kelime çıkarabilecek miyim bakalım.",
       "Tahtadaki harflere bağlanmak en mantıklısı gibi duruyor.",
-      "Kelimelikte ufak bir harf bile oyunun yönünü değiştiriyor.",
     ],
     battleship: [
       "Radarlarım açık, bakalım hangi kareyi vuracaksın.",
       "Gemilerim sağlam duruyor ama belli de olmaz.",
       "İsabet alırsan işim zorlaşır, dikkatli atış yap 😄",
-      "Denizde sessizlik var, sıradaki hamleni bekliyorum.",
     ],
     rps: [
       "5 tur çabuk geçiyor, her elde ters köşe mümkün.",
       "Bu tur ne seçeceğimi ben de son anda kararlaştırdım.",
       "Taş kağıt makasta en sevdiğim şey tamamen psikoloji olması.",
-      "Bakalım bu tur kim üstün gelecek!",
     ],
     ttt: [
       "Ortayı kapmak veya köşeleri kollamak klasik ama işe yarıyor.",
       "3x3 hızlı ama tek hatada maç biter, dikkatli olalım.",
       "Güzel hamleydi, sırayı bozmadan devam edelim.",
-      "Bakalım üçlemeyi kim önce kuracak.",
     ],
     wordle: [
       "İlk tahminde sesli harf denemek genelde iş yapıyor.",
       "Yeşil ve turuncu harfler gelince tablo netleşiyor.",
       "5 harfte bazen en tanıdık kelime gözden kaçabiliyor 😄",
-      "İpuçlarını iyi birleştirirsen çabuk çözersin.",
     ],
     sudoku: [
       "Satır, sütun ve 2x2 kutuyu aynı anda kontrol etmek lazım.",
       "4x4 hızlı ama tek çakışma kafa karıştırabiliyor.",
-      "Güzel ilerliyorsun, bakalım kim önce bitirecek.",
       "Rakamları yerleştirdikçe tablo açılıyor.",
     ],
   },
@@ -453,65 +490,120 @@ const BOT_CHAT_POOLS = {
 
 const recentBotRepliesRef = [];
 
-function detectMessageTone(text) {
-  const lower = String(text || "").toLocaleLowerCase("tr").trim();
-  const hasQuestion = lower.includes("?") || /\b(mi|mı|mu|mü|nasıl|neden|niye|ne|kim|nerede|kaç)\b/.test(lower);
-  const isGreeting = /\b(selam|merhaba|slm|mrb|hey|günaydın|iyi akşamlar|iyi geceler|naber|nasılsın)\b/.test(lower);
-  const isPlayful = /[😄😂😉😜😎🔥👏]|(şaka|espri|iddia|şans|yenicem|kazanıcam|kolay|hadi bakalım|blöf)/.test(lower);
-  const isWarm = /(kanka|dostum|hocam|ya|valla|harbi|aynen|bence|super|süper|güzel|iyi|eyvallah|sağol|teşekkür)/.test(lower);
-  const isRematch = /\b(rövanş|tekrar|bir daha|yeniden|devam|bitti|bitince)\b/.test(lower);
-
-  if (isRematch) return "rematch";
-  if (hasQuestion) return "question";
-  if (isGreeting) return "greeting";
-  if (isPlayful) return "playful";
-  if (isWarm) return "warm";
-  return "general";
-}
-
 function pickNonRepeatingFromPool(pool) {
   if (!Array.isArray(pool) || pool.length === 0) return "Bence de, güzel gidiyor!";
   const candidates = pool.filter((item) => !recentBotRepliesRef.includes(item));
   const source = candidates.length > 0 ? candidates : pool;
   const chosen = source[Math.floor(Math.random() * source.length)];
   recentBotRepliesRef.push(chosen);
-  if (recentBotRepliesRef.length > 14) {
+  if (recentBotRepliesRef.length > 16) {
     recentBotRepliesRef.shift();
   }
   return chosen;
 }
 
-function getBotChatReply(text, gameType) {
-  const tone = detectMessageTone(text);
-  const gamePool = BOT_CHAT_POOLS.gameSpecific[gameType] || [];
-  const shouldMentionGame = Math.random() < 0.35 && gamePool.length > 0 && tone !== "greeting";
+function getBotChatReply(text, gameType, botId = "bot_efe", botName = "Efe") {
+  const raw = String(text || "").trim();
+  const lower = raw.toLocaleLowerCase("tr");
+  const persona = BOT_PERSONAS[botId] || {
+    name: botName || "Efe",
+    age: "24",
+    city: "İstanbul",
+    job: "kendi işlerimle uğraşıyorum",
+    hobby: "akşamları kafa dağıtmak için oyun oynuyorum",
+  };
 
-  if (shouldMentionGame) {
-    return pickNonRepeatingFromPool(gamePool);
+  if (/(kaç yaş|yaşın kaç|yaş kaç|yaşındasın)/.test(lower)) {
+    return pickNonRepeatingFromPool([
+      `${persona.age} yaşındayım, sen kaç yaşındasın?`,
+      `${persona.age}'im ben, sende yaş kaç?`,
+      `${persona.age} oldum bu yıl, sen kaçsın?`,
+    ]);
   }
-  if (tone === "greeting") {
+
+  if (/(nerelisin|neredesin|nerden|hangi şehir|nerede yaşıyorsun|nerde yaşıyorsun)/.test(lower)) {
+    return pickNonRepeatingFromPool([
+      `${persona.city}'dan katılıyorum, sen neredensin?`,
+      `${persona.city} tarafındayım ben, sen hangi şehirdesin?`,
+      `Normalde ${persona.city}'dayım, sen nerelisin?`,
+    ]);
+  }
+
+  if (/(ne iş|mesleğin|okuyor musun|çalışıyor musun|hangi bölüm|ne okuyorsun)/.test(lower)) {
+    return pickNonRepeatingFromPool([
+      `Şu sıralar ${persona.job}, senin günler nasıl geçiyor, okuyor musun çalışıyor musun?`,
+      `Ben ${persona.job}. Sen neler yapıyorsun?`,
+    ]);
+  }
+
+  if (/(adın ne|ismin ne|kimsin)/.test(lower)) {
+    return pickNonRepeatingFromPool([
+      `Ben ${persona.name}, tanıştığımıza memnun oldum!`,
+      `${persona.name} ben, sen de bayağı hızlı oynuyorsun 😄`,
+    ]);
+  }
+
+  if (/(bot musun|robot musun|yapay zeka|gerçek misin)/.test(lower)) {
+    return pickNonRepeatingFromPool([
+      `Yok artık daha neler 😂 ${persona.city}'dan giriyorum, ne botu!`,
+      `Haha yok be, telefondan kafa dağıtmaya girdim sadece 😄`,
+      `Yok canım gerçek insanım tabii, niye öyle dedin ki?`,
+    ]);
+  }
+
+  if (/(ne yapıyorsun|napıyorsun|neler yapıyorsun|naber|ne haber)/.test(lower)) {
+    return pickNonRepeatingFromPool([
+      `Valla ${persona.hobby}, sen neler yapıyorsun?`,
+      `İyidir senden naber? Bir yandan oyun bir yandan sohbet işte.`,
+      `Oturuyorum öyle, kafa dağıtmalık birkaç el atayım dedim. Sende ne var ne yok?`,
+    ]);
+  }
+
+  if (/(nasılsın|iyi misin|keyfin nasıl|keyifler nasıl)/.test(lower)) {
+    return pickNonRepeatingFromPool(BOT_CHAT_POOLS.howAreYou);
+  }
+
+  if (/^(iyiyim|ben de iyiyim|süper|fena değil|idare eder|hamdolsun|şükür)\b/.test(lower)) {
+    return pickNonRepeatingFromPool([
+      "Sevindim iyi olmana, daim olsun! Hangi şehirden giriyorsun?",
+      "Süper, keyifler yerindeyse ne güzel. Sık sık girer misin buraya?",
+      "Güzel güzel, oyuna da odaklanmış görünüyorsun 😄",
+    ]);
+  }
+
+  if (/\b(selam|merhaba|slm|mrb|hey|günaydın|iyi akşamlar|iyi geceler)\b/.test(lower)) {
     return pickNonRepeatingFromPool(BOT_CHAT_POOLS.greeting);
   }
-  if (tone === "question") {
-    return pickNonRepeatingFromPool([...BOT_CHAT_POOLS.questionOrCuriosity, ...BOT_CHAT_POOLS.warmCasual]);
-  }
-  if (tone === "playful") {
-    return pickNonRepeatingFromPool(BOT_CHAT_POOLS.playfulBanter);
-  }
-  if (tone === "rematch") {
+
+  if (/\b(rövanş|tekrar|bir daha|yeniden|devam|bitti|bitince)\b/.test(lower)) {
     return pickNonRepeatingFromPool(BOT_CHAT_POOLS.rematchOrPace);
   }
-  if (tone === "warm") {
-    return pickNonRepeatingFromPool([...BOT_CHAT_POOLS.warmCasual, ...BOT_CHAT_POOLS.greeting.slice(2)]);
+
+  if (/[😄😂😉😜😎🔥👏]|(şaka|espri|iddia|şans|yenicem|kazanıcam|kolay|hadi bakalım)/.test(lower)) {
+    return pickNonRepeatingFromPool(BOT_CHAT_POOLS.playfulBanter);
   }
-  return pickNonRepeatingFromPool([...BOT_CHAT_POOLS.warmCasual, ...BOT_CHAT_POOLS.questionOrCuriosity]);
+
+  if (raw.includes("?") || /\b(mi|mı|mu|mü|neden|niye)\b/.test(lower)) {
+    return pickNonRepeatingFromPool([
+      "Bence duruma göre değişir ya, senin düşüncen ne bu konuda?",
+      "Açıkçası ben de tam emin değilim ama mantıklı geliyor, sence?",
+      "Valla bence keyfine bakmak en iyisi, sen nasıl düşünüyorsun?",
+    ]);
+  }
+
+  const gamePool = BOT_CHAT_POOLS.gameSpecific[gameType] || [];
+  if (Math.random() < 0.3 && gamePool.length > 0) {
+    return pickNonRepeatingFromPool(gamePool);
+  }
+
+  return pickNonRepeatingFromPool(BOT_CHAT_POOLS.warmCasual);
 }
 
 function computeHumanBotDelayMs(text) {
   const len = String(text || "").trim().length;
-  const base = 1200 + Math.min(len * 35, 1400);
-  const jitter = Math.floor(Math.random() * 1200);
-  return Math.min(3800, Math.max(1200, base + jitter));
+  const base = 1300 + Math.min(len * 40, 1500);
+  const jitter = Math.floor(Math.random() * 1300);
+  return Math.min(4000, Math.max(1300, base + jitter));
 }
 
 function pickRandomTenBluffWords() {
@@ -1519,6 +1611,7 @@ export default function App() {
     },
     [myId, activeMatch, syncBluffState]
   );
+
   useEffect(() => {
     if (!activeMatch || activeMatch.gameType !== "bluff" || !bluffState) return;
     if (!activeMatch.isHost) return;
@@ -1869,7 +1962,6 @@ export default function App() {
     });
     return () => unsub();
   }, [activeMatch, myId, matchDrawerOpen]);
-
   useEffect(() => {
     if (!dbRef.current || !outgoingInvite || !outgoingInvite.toId) {
       acceptedHandledRef.current = false;
@@ -3093,12 +3185,13 @@ export default function App() {
         [peerSnapshot.id]: [...(prev[peerSnapshot.id] || []), msg],
       }));
       const delayMs = computeHumanBotDelayMs(text);
+      const replyText = getBotChatReply(text, "general", peerSnapshot.id, peerSnapshot.name);
       setTimeout(() => {
         const replyMsg = {
           id: "dm_b_" + Date.now(),
           senderId: peerSnapshot.id,
           senderName: peerSnapshot.name,
-          text: getBotChatReply(text, "general"),
+          text: replyText,
           ts: Date.now(),
         };
         setDmMessagesByPeer((prev) => ({
@@ -3137,7 +3230,12 @@ export default function App() {
     if (activeMatch.isBot || LOBBY_BOT_ID_SET.has(activeMatch.opponent?.id)) {
       if (botChatTimerRef.current) clearTimeout(botChatTimerRef.current);
       const delayMs = computeHumanBotDelayMs(text);
-      const replyText = getBotChatReply(text, activeMatch.gameType);
+      const replyText = getBotChatReply(
+        text,
+        activeMatch.gameType,
+        activeMatch.opponent?.id,
+        activeMatch.opponent?.name
+      );
       botChatTimerRef.current = setTimeout(() => {
         const botMsg = {
           id: "mc_bot_" + Date.now() + "_" + Math.random().toString(36).slice(2, 4),
@@ -5485,9 +5583,9 @@ export default function App() {
                         onClick={() => sendBluffInviteToUser(u)}
                         className={`px-2.5 py-1 rounded-lg font-bold text-[11px] ${
                           invState === "accepted"
-                            ? "bg-emerald-600/30 text-emerald-300"
+                            ? "bg-emerald-600/30 text-emerald-300 border border-emerald-500/40"
                             : invState === "pending"
-                            ? "bg-amber-500/20 text-amber-300"
+                            ? "bg-amber-600/20 text-amber-300 border border-amber-500/30"
                             : busy
                             ? "bg-slate-800 text-slate-500"
                             : "bg-indigo-600 hover:bg-indigo-500 text-white"
@@ -5496,7 +5594,7 @@ export default function App() {
                         {invState === "accepted"
                           ? "Katıldı"
                           : invState === "pending"
-                          ? "Davet Edildi"
+                          ? "Bekleniyor..."
                           : busy
                           ? "Oyunda"
                           : "Davet Et"}
@@ -5511,7 +5609,7 @@ export default function App() {
               onClick={handleStartBluffFromTable}
               className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-extrabold text-xs text-white shadow-lg"
             >
-              Blöf Oyununu Başlat ({Math.max(3, 1 + bluffJoinedMembers.length)} Kişi)
+              Blöf Oyununu Başlat
             </button>
           </div>
         </div>
@@ -5522,8 +5620,10 @@ export default function App() {
           <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-extrabold text-white">{selectedTargetUser.name}</h3>
-                <p className="text-xs text-slate-400">Oyun daveti göndermek için oyun seç</p>
+                <h3 className="text-base font-extrabold text-white">
+                  {selectedTargetUser.name} ile Oyna
+                </h3>
+                <p className="text-xs text-slate-400">Oyun seç ve davet gönder</p>
               </div>
               <button
                 onClick={() => setSelectedTargetUser(null)}
@@ -5540,37 +5640,25 @@ export default function App() {
                   <button
                     key={g.id}
                     onClick={() => setSelectedGameForInvite(g.id)}
-                    className={`p-2.5 rounded-xl border text-left text-xs font-bold transition ${
+                    className={`p-2.5 rounded-xl border text-left transition ${
                       active
                         ? "bg-indigo-600/25 border-indigo-400 text-white"
                         : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
                     }`}
                   >
-                    <div>{g.name}</div>
-                    <div className="text-[10px] font-normal text-slate-400">{g.badge}</div>
+                    <div className="text-xs font-bold">{g.name}</div>
+                    <div className="text-[10px] text-slate-400">{g.badge}</div>
                   </button>
                 );
               })}
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                onClick={() => {
-                  const peer = selectedTargetUser;
-                  setSelectedTargetUser(null);
-                  openDirectMessage(peer);
-                }}
-                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-xs text-slate-200"
-              >
-                Özel Mesaj
-              </button>
-              <button
-                onClick={() => sendGameInvite(selectedTargetUser, selectedGameForInvite)}
-                className="py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-xs text-white"
-              >
-                Davet Gönder
-              </button>
-            </div>
+            <button
+              onClick={() => sendGameInvite(selectedTargetUser, selectedGameForInvite)}
+              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-xs text-white"
+            >
+              {selectedGameForInvite === "bluff" ? "Blöf Masası Kur & Davet Et" : "Davet Gönder"}
+            </button>
           </div>
         </div>
       )}
@@ -5582,9 +5670,12 @@ export default function App() {
             className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl"
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-white">
-                {reportTargetUser.name} Kullanıcısını Şikayet Et
-              </h3>
+              <div className="flex items-center gap-2">
+                <Flag className="w-4 h-4 text-amber-400" />
+                <h3 className="text-base font-extrabold text-white">
+                  {reportTargetUser.name} Şikayet Et
+                </h3>
+              </div>
               <button
                 type="button"
                 onClick={() => setReportTargetUser(null)}
@@ -5594,33 +5685,20 @@ export default function App() {
               </button>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs text-slate-400">Şikayet Sebebi</label>
-              <input
-                type="text"
-                maxLength={120}
-                value={reportReason}
-                onChange={(e) => setReportReason(e.target.value)}
-                placeholder="Örn: Uygunsuz sohbet mesajı"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-amber-400"
-              />
-            </div>
+            <textarea
+              rows={3}
+              value={reportReason}
+              onChange={(e) => setReportReason(e.target.value)}
+              placeholder="Şikayet sebebini kısaca yaz..."
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+            />
 
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => setReportTargetUser(null)}
-                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300"
-              >
-                İptal
-              </button>
-              <button
-                type="submit"
-                className="py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-extrabold text-slate-950"
-              >
-                Şikayeti Gönder
-              </button>
-            </div>
+            <button
+              type="submit"
+              className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs"
+            >
+              Şikayeti Gönder
+            </button>
           </form>
         </div>
       )}
@@ -5631,7 +5709,7 @@ export default function App() {
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
               <div>
                 <h3 className="text-sm font-extrabold text-white">{dmTarget.name}</h3>
-                <p className="text-[11px] text-slate-400">Özel Sohbet • 1 saat sonra silinir</p>
+                <p className="text-[11px] text-slate-400">Özel Sohbet (1 saat sonra silinir)</p>
               </div>
               <button
                 onClick={() => setDmTarget(null)}
@@ -5641,11 +5719,11 @@ export default function App() {
               </button>
             </div>
 
-            <div className="h-60 overflow-y-auto space-y-2 pr-1">
+            <div className="h-56 overflow-y-auto space-y-2 pr-1">
               {activeDmList.length === 0 ? (
-                <div className="text-xs text-slate-500 text-center py-10">
+                <p className="text-xs text-center text-slate-500 pt-16">
                   Henüz mesaj yok. İlk mesajı sen gönder!
-                </div>
+                </p>
               ) : (
                 activeDmList.map((m) => {
                   const mine = m.senderId === myId;
@@ -5655,7 +5733,7 @@ export default function App() {
                       className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
                     >
                       <div
-                        className={`px-3 py-2 rounded-2xl text-xs max-w-[82%] ${
+                        className={`px-3.5 py-2 rounded-2xl text-xs max-w-[82%] ${
                           mine
                             ? "bg-indigo-600 text-white rounded-br-sm"
                             : "bg-slate-800 text-slate-100 rounded-bl-sm"
@@ -5669,17 +5747,17 @@ export default function App() {
               )}
             </div>
 
-            <form onSubmit={handleSendDirectMessage} className="flex items-center gap-2">
+            <form onSubmit={handleSendDirectMessage} className="flex gap-2">
               <input
                 type="text"
                 value={dmInput}
                 onChange={(e) => setDmInput(e.target.value)}
-                placeholder={`${dmTarget.name} kişisine mesaj yaz...`}
+                placeholder={`${dmTarget.name} kişisine yaz...`}
                 className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
               />
               <button
                 type="submit"
-                className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
+                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
               >
                 <Send className="w-4 h-4" />
               </button>
