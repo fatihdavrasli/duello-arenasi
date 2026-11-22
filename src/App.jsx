@@ -43,6 +43,10 @@ import {
   UserPlus,
   Play,
   CornerUpLeft,
+  Shuffle,
+  Undo2,
+  SkipForward,
+  Layers,
 } from "lucide-react";
 
 const FIREBASE_CONFIG =
@@ -59,7 +63,217 @@ const GAMES_META = [
   { id: "ttt", name: "Tic Tac Toe", desc: "3x3 sıra tabanlı XOX", badge: "Klasik", icon: Hash },
   { id: "wordle", name: "Kelime Bulma", desc: "5 harfli Türkçe kelime yarışı", badge: "Kelime", icon: Type },
   { id: "sudoku", name: "Sudoku", desc: "4x4 mini sudoku hız yarışı", badge: "Zeka", icon: Grid },
+  { id: "kelimelik", name: "Kelimelik", desc: "7x7 tahtada kelime kur & puan topla", badge: "Yeni", icon: Layers },
 ];
+
+const RANDOM_DUEL_GAME_IDS = [
+  "kelimelik",
+  "battleship",
+  "rps",
+  "ttt",
+  "wordle",
+  "sudoku",
+];
+
+const LOBBY_BOT_PLAYERS = [
+  { id: "bot_efe", name: "Efe", isBot: true, status: "online", wins: 5, lastSeenAt: Date.now() - 1000 * 40 },
+  { id: "bot_defne", name: "Defne", isBot: true, status: "online", wins: 7, lastSeenAt: Date.now() - 1000 * 75 },
+  { id: "bot_arda", name: "Arda", isBot: true, status: "online", wins: 3, lastSeenAt: Date.now() - 1000 * 110 },
+  { id: "bot_elif", name: "Elif", isBot: true, status: "online", wins: 6, lastSeenAt: Date.now() - 1000 * 150 },
+  { id: "bot_kuzey", name: "Kuzey", isBot: true, status: "online", wins: 4, lastSeenAt: Date.now() - 1000 * 210 },
+  { id: "bot_mira", name: "Mira", isBot: true, status: "online", wins: 8, lastSeenAt: Date.now() - 1000 * 260 },
+];
+
+const LOBBY_BOT_ID_SET = new Set(LOBBY_BOT_PLAYERS.map((b) => b.id));
+
+const KELIMELIK_SIZE = 7;
+
+const KELIMELIK_BONUS_MAP = {
+  "0,0": "K2",
+  "0,6": "K2",
+  "6,0": "K2",
+  "6,6": "K2",
+  "1,3": "H2",
+  "3,1": "H2",
+  "3,5": "H2",
+  "5,3": "H2",
+  "3,3": "STAR",
+};
+
+const LETTER_POINTS_TR = {
+  A: 1, E: 1, İ: 1, I: 1, K: 1, L: 1, R: 1, S: 1, T: 1, N: 1, U: 1, Ü: 1,
+  B: 2, D: 2, M: 2, O: 2, Ö: 2, Y: 2,
+  C: 3, Ç: 3, G: 3, H: 3, P: 3, Ş: 3, V: 3, Z: 3,
+  F: 5, Ğ: 5, J: 7,
+};
+
+const KELIMELIK_STARTERS = ["KALE", "DENİZ", "BULUT", "MASAL", "MÜZİK", "ŞEHİR"];
+
+const KELIMELIK_BOT_WORDS = [
+  "KALE", "DENİZ", "BULUT", "MASAL", "MÜZİK", "ŞEHİR", "BARIŞ", "MARTI",
+  "DALGA", "SAHİL", "LİMAN", "ORMAN", "TARLA", "RADYO", "MELEK", "GÜNEŞ",
+  "KAVUN", "KEDİ", "ARABA", "KİTAP", "KALEM", "SAAT", "PASTA", "UÇAK",
+];
+
+function getLetterPoint(ch) {
+  if (!ch) return 1;
+  const upper = ch === "i" ? "İ" : String(ch).toLocaleUpperCase("tr");
+  return LETTER_POINTS_TR[upper] || 1;
+}
+
+function drawKelimelikRack(count = 7) {
+  const bag = [
+    "A", "A", "A", "E", "E", "İ", "İ", "I", "K", "K", "L", "L", "R", "R",
+    "S", "T", "N", "U", "Ü", "B", "D", "M", "O", "Ö", "Y", "C", "Ç", "G",
+    "H", "P", "Ş", "V", "Z", "F", "Ğ",
+  ];
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    out.push(bag[Math.floor(Math.random() * bag.length)]);
+  }
+  return out;
+}
+
+function createInitialKelimelikBoard() {
+  const board = Array.from({ length: KELIMELIK_SIZE }, () =>
+    Array.from({ length: KELIMELIK_SIZE }, () => null)
+  );
+  const starterWord =
+    KELIMELIK_STARTERS[Math.floor(Math.random() * KELIMELIK_STARTERS.length)];
+  const chars = Array.from(starterWord);
+  const startCol = Math.max(0, Math.floor((KELIMELIK_SIZE - chars.length) / 2));
+  chars.forEach((ch, idx) => {
+    const c = Math.min(KELIMELIK_SIZE - 1, startCol + idx);
+    board[3][c] = {
+      letter: ch,
+      points: getLetterPoint(ch),
+      locked: true,
+    };
+  });
+  return board;
+}
+
+function evaluateKelimelikPlacement(board, draftCells) {
+  if (!Array.isArray(draftCells) || draftCells.length === 0) {
+    return { ok: false, reason: "Tahtaya en az 1 harf yerleştir." };
+  }
+
+  const sameRow = draftCells.every((d) => d.r === draftCells[0].r);
+  const sameCol = draftCells.every((d) => d.c === draftCells[0].c);
+  if (!sameRow && !sameCol) {
+    return { ok: false, reason: "Harfleri tek bir yatay veya dikey çizgide diz." };
+  }
+
+  let touchesExisting = false;
+  for (const d of draftCells) {
+    const neighbors = [
+      [d.r - 1, d.c],
+      [d.r + 1, d.c],
+      [d.r, d.c - 1],
+      [d.r, d.c + 1],
+    ];
+    for (const [nr, nc] of neighbors) {
+      if (nr >= 0 && nr < KELIMELIK_SIZE && nc >= 0 && nc < KELIMELIK_SIZE) {
+        if (board[nr][nc] && board[nr][nc].letter) {
+          touchesExisting = true;
+        }
+      }
+    }
+  }
+  if (!touchesExisting) {
+    return { ok: false, reason: "Yeni harfler tahtadaki mevcut harflere temas etmeli." };
+  }
+
+  const draftMap = new Map();
+  draftCells.forEach((d) => draftMap.set(`${d.r},${d.c}`, d));
+
+  let wordLetters = [];
+  let baseSum = 0;
+  let wordMultiplier = 1;
+
+  if (sameRow || draftCells.length === 1) {
+    const r = draftCells[0].r;
+    const cols = draftCells.map((d) => d.c);
+    let minC = Math.min(...cols);
+    let maxC = Math.max(...cols);
+    while (minC - 1 >= 0 && (board[r][minC - 1]?.letter || draftMap.has(`${r},${minC - 1}`))) {
+      minC--;
+    }
+    while (
+      maxC + 1 < KELIMELIK_SIZE &&
+      (board[r][maxC + 1]?.letter || draftMap.has(`${r},${maxC + 1}`))
+    ) {
+      maxC++;
+    }
+    for (let c = minC; c <= maxC; c++) {
+      const key = `${r},${c}`;
+      const draftItem = draftMap.get(key);
+      const lockedItem = board[r][c];
+      const ch = draftItem ? draftItem.letter : lockedItem?.letter;
+      if (!ch) {
+        return { ok: false, reason: "Harfler arasında boş kare bırakma." };
+      }
+      wordLetters.push(ch);
+      const pt = getLetterPoint(ch);
+      if (draftItem) {
+        const bonus = KELIMELIK_BONUS_MAP[key];
+        if (bonus === "H2") baseSum += pt * 2;
+        else baseSum += pt;
+        if (bonus === "K2") wordMultiplier *= 2;
+      } else {
+        baseSum += pt;
+      }
+    }
+  }
+
+  if (wordLetters.length < 2 && (sameCol || draftCells.length === 1)) {
+    wordLetters = [];
+    baseSum = 0;
+    wordMultiplier = 1;
+    const c = draftCells[0].c;
+    const rows = draftCells.map((d) => d.r);
+    let minR = Math.min(...rows);
+    let maxR = Math.max(...rows);
+    while (minR - 1 >= 0 && (board[minR - 1][c]?.letter || draftMap.has(`${minR - 1},${c}`))) {
+      minR--;
+    }
+    while (
+      maxR + 1 < KELIMELIK_SIZE &&
+      (board[maxR + 1][c]?.letter || draftMap.has(`${maxR + 1},${c}`))
+    ) {
+      maxR++;
+    }
+    for (let r = minR; r <= maxR; r++) {
+      const key = `${r},${c}`;
+      const draftItem = draftMap.get(key);
+      const lockedItem = board[r][c];
+      const ch = draftItem ? draftItem.letter : lockedItem?.letter;
+      if (!ch) {
+        return { ok: false, reason: "Harfler arasında boş kare bırakma." };
+      }
+      wordLetters.push(ch);
+      const pt = getLetterPoint(ch);
+      if (draftItem) {
+        const bonus = KELIMELIK_BONUS_MAP[key];
+        if (bonus === "H2") baseSum += pt * 2;
+        else baseSum += pt;
+        if (bonus === "K2") wordMultiplier *= 2;
+      } else {
+        baseSum += pt;
+      }
+    }
+  }
+
+  if (wordLetters.length < 2) {
+    return { ok: false, reason: "En az 2 harfli bir kelime oluştur." };
+  }
+
+  return {
+    ok: true,
+    word: wordLetters.join(""),
+    points: baseSum * wordMultiplier,
+  };
+}
 
 const BLUFF_WORD_BANK = [
   { word: "Araba", clues: ["Tekerlek", "Direksiyon", "Yolculuk", "Motor", "Trafik", "Benzin"] },
@@ -147,15 +361,158 @@ const SUDOKU_PUZZLES = [
 ];
 
 const INITIAL_KNOWN_PLAYERS = [
-  { id: "seed_1", name: "Zeynep", wins: 4, lastSeenAt: Date.now() - 1000 * 60 * 18 },
-  { id: "seed_2", name: "Mert", wins: 2, lastSeenAt: Date.now() - 1000 * 60 * 42 },
-  { id: "seed_3", name: "Eda", wins: 6, lastSeenAt: Date.now() - 1000 * 60 * 9 },
-  { id: "seed_4", name: "Kaan", wins: 3, lastSeenAt: Date.now() - 1000 * 60 * 75 },
-  { id: "seed_5", name: "Selin", wins: 1, lastSeenAt: Date.now() - 1000 * 60 * 120 },
+  { id: "bot_efe", name: "Efe", wins: 5, lastSeenAt: Date.now() - 1000 * 40 },
+  { id: "bot_defne", name: "Defne", wins: 7, lastSeenAt: Date.now() - 1000 * 75 },
+  { id: "bot_arda", name: "Arda", wins: 3, lastSeenAt: Date.now() - 1000 * 110 },
+  { id: "bot_elif", name: "Elif", wins: 6, lastSeenAt: Date.now() - 1000 * 150 },
+  { id: "bot_kuzey", name: "Kuzey", wins: 4, lastSeenAt: Date.now() - 1000 * 210 },
+  { id: "bot_mira", name: "Mira", wins: 8, lastSeenAt: Date.now() - 1000 * 260 },
 ];
 
 const QUICK_REPLIES = ["İyi hamle! 👏", "Şanslıydın 😄", "Çok yakındı! 🔥", "Rövanş? 🔄"];
 const EMOJIS = ["👏", "😂", "🔥", "😱", "🤔", "👑"];
+
+const BOT_CHAT_POOLS = {
+  greeting: [
+    "Selam! Nasılsın, keyifler nasıl?",
+    "Hey, hoş geldin! Bugün günün nasıl geçiyor?",
+    "Selamlar, tam vaktinde denk geldik 😄",
+    "Selam! Hazırsan hem oynayalım hem sohbet edelim.",
+    "Heyy, nasılsın? Ben de tam yeni el açmıştım.",
+    "Selam! Akşamın nasıl geçiyor, dinleniyor musun?",
+  ],
+  warmCasual: [
+    "Haha harbi mi, hiç öyle düşünmemiştim 😄",
+    "Bence de ya, bayağı sarıyor şu an.",
+    "Aynen öyle, ben de tam onu diyecektim!",
+    "Vayy iyi yakaladın, gözünden kaçmıyor hiç.",
+    "Olur olur, hiç acelem yok, rahat takılalım.",
+    "Çok iyiymiş, valla keyfim yerine geldi.",
+    "Bence bu işin tadı böyle çıkıyor zaten.",
+    "Sana katılıyorum, birazdan işler kızışır gibi.",
+  ],
+  playfulBanter: [
+    "Şansın bu sefer yaver gidiyor gibi ama bakalım 😂",
+    "Gözüm üzerinde, boş bırakmayacağım seni 👀",
+    "İddialı konuşuyorsun, beğendim bu özgüveni 😄",
+    "Birazdan taşlar yerine oturur, görürsün!",
+    "Tamam şampiyon, bu eli al bakalım şimdilik 😉",
+    "Heyecan yaptırmıyorsun hiç, soğukkanlısın bayağı.",
+  ],
+  questionOrCuriosity: [
+    "Valla şu an hem oyuna odaklandım hem muhabbet güzel gidiyor, sen ne yapıyorsun?",
+    "Bence ikisi de mantıklı ama duruma göre değişir, sence?",
+    "Şu an fena değil, senden ne haber, nasıl gidiyor?",
+    "Açıkçası hiç beklemediğim bir yerden geldi, sen ne dersin?",
+  ],
+  rematchOrPace: [
+    "Biter bitmez bir el daha atarız, sıkıntı yok!",
+    "Aynen, rövanş her zaman var, önce şu eli bitirelim.",
+    "Biraz daha tempo artar gibi, bakalım kim önde bitirecek.",
+    "Tamam, ne zaman istersen tekrar deneriz.",
+  ],
+  gameSpecific: {
+    kelimelik: [
+      "K2 veya H2 karesi denk gelirse skor bir anda değişir.",
+      "Elimdeki harflerle güzel bir kelime çıkarabilecek miyim bakalım.",
+      "Tahtadaki harflere bağlanmak en mantıklısı gibi duruyor.",
+      "Kelimelikte ufak bir harf bile oyunun yönünü değiştiriyor.",
+    ],
+    battleship: [
+      "Radarlarım açık, bakalım hangi kareyi vuracaksın.",
+      "Gemilerim sağlam duruyor ama belli de olmaz.",
+      "İsabet alırsan işim zorlaşır, dikkatli atış yap 😄",
+      "Denizde sessizlik var, sıradaki hamleni bekliyorum.",
+    ],
+    rps: [
+      "5 tur çabuk geçiyor, her elde ters köşe mümkün.",
+      "Bu tur ne seçeceğimi ben de son anda kararlaştırdım.",
+      "Taş kağıt makasta en sevdiğim şey tamamen psikoloji olması.",
+      "Bakalım bu tur kim üstün gelecek!",
+    ],
+    ttt: [
+      "Ortayı kapmak veya köşeleri kollamak klasik ama işe yarıyor.",
+      "3x3 hızlı ama tek hatada maç biter, dikkatli olalım.",
+      "Güzel hamleydi, sırayı bozmadan devam edelim.",
+      "Bakalım üçlemeyi kim önce kuracak.",
+    ],
+    wordle: [
+      "İlk tahminde sesli harf denemek genelde iş yapıyor.",
+      "Yeşil ve turuncu harfler gelince tablo netleşiyor.",
+      "5 harfte bazen en tanıdık kelime gözden kaçabiliyor 😄",
+      "İpuçlarını iyi birleştirirsen çabuk çözersin.",
+    ],
+    sudoku: [
+      "Satır, sütun ve 2x2 kutuyu aynı anda kontrol etmek lazım.",
+      "4x4 hızlı ama tek çakışma kafa karıştırabiliyor.",
+      "Güzel ilerliyorsun, bakalım kim önce bitirecek.",
+      "Rakamları yerleştirdikçe tablo açılıyor.",
+    ],
+  },
+};
+
+const recentBotRepliesRef = [];
+
+function detectMessageTone(text) {
+  const lower = String(text || "").toLocaleLowerCase("tr").trim();
+  const hasQuestion = lower.includes("?") || /\b(mi|mı|mu|mü|nasıl|neden|niye|ne|kim|nerede|kaç)\b/.test(lower);
+  const isGreeting = /\b(selam|merhaba|slm|mrb|hey|günaydın|iyi akşamlar|iyi geceler|naber|nasılsın)\b/.test(lower);
+  const isPlayful = /[😄😂😉😜😎🔥👏]|(şaka|espri|iddia|şans|yenicem|kazanıcam|kolay|hadi bakalım|blöf)/.test(lower);
+  const isWarm = /(kanka|dostum|hocam|ya|valla|harbi|aynen|bence|super|süper|güzel|iyi|eyvallah|sağol|teşekkür)/.test(lower);
+  const isRematch = /\b(rövanş|tekrar|bir daha|yeniden|devam|bitti|bitince)\b/.test(lower);
+
+  if (isRematch) return "rematch";
+  if (hasQuestion) return "question";
+  if (isGreeting) return "greeting";
+  if (isPlayful) return "playful";
+  if (isWarm) return "warm";
+  return "general";
+}
+
+function pickNonRepeatingFromPool(pool) {
+  if (!Array.isArray(pool) || pool.length === 0) return "Bence de, güzel gidiyor!";
+  const candidates = pool.filter((item) => !recentBotRepliesRef.includes(item));
+  const source = candidates.length > 0 ? candidates : pool;
+  const chosen = source[Math.floor(Math.random() * source.length)];
+  recentBotRepliesRef.push(chosen);
+  if (recentBotRepliesRef.length > 14) {
+    recentBotRepliesRef.shift();
+  }
+  return chosen;
+}
+
+function getBotChatReply(text, gameType) {
+  const tone = detectMessageTone(text);
+  const gamePool = BOT_CHAT_POOLS.gameSpecific[gameType] || [];
+  const shouldMentionGame = Math.random() < 0.35 && gamePool.length > 0 && tone !== "greeting";
+
+  if (shouldMentionGame) {
+    return pickNonRepeatingFromPool(gamePool);
+  }
+  if (tone === "greeting") {
+    return pickNonRepeatingFromPool(BOT_CHAT_POOLS.greeting);
+  }
+  if (tone === "question") {
+    return pickNonRepeatingFromPool([...BOT_CHAT_POOLS.questionOrCuriosity, ...BOT_CHAT_POOLS.warmCasual]);
+  }
+  if (tone === "playful") {
+    return pickNonRepeatingFromPool(BOT_CHAT_POOLS.playfulBanter);
+  }
+  if (tone === "rematch") {
+    return pickNonRepeatingFromPool(BOT_CHAT_POOLS.rematchOrPace);
+  }
+  if (tone === "warm") {
+    return pickNonRepeatingFromPool([...BOT_CHAT_POOLS.warmCasual, ...BOT_CHAT_POOLS.greeting.slice(2)]);
+  }
+  return pickNonRepeatingFromPool([...BOT_CHAT_POOLS.warmCasual, ...BOT_CHAT_POOLS.questionOrCuriosity]);
+}
+
+function computeHumanBotDelayMs(text) {
+  const len = String(text || "").trim().length;
+  const base = 1200 + Math.min(len * 35, 1400);
+  const jitter = Math.floor(Math.random() * 1200);
+  return Math.min(3800, Math.max(1200, base + jitter));
+}
 
 function pickRandomTenBluffWords() {
   const shuffled = [...BLUFF_WORD_BANK].sort(() => Math.random() - 0.5);
@@ -319,17 +676,6 @@ function countHitsOnGrid(shotsGrid) {
   );
 }
 
-function getBotChatReply(text, gameType) {
-  const lower = (text || "").toLocaleLowerCase("tr");
-  if (lower.includes("rövanş") || lower.includes("tekrar")) return "Hemen bir tur daha atalım, hazırım! 🔥";
-  if (lower.includes("blöf")) return "Bence çağrışımlara dikkat et, biri kesin uyduruyor 👀";
-  if (lower.includes("şans") || lower.includes("nasıl")) return "Tamamen hesaplanmış strateji 😄";
-  if (gameType === "battleship") return "Radarlarım açık, gemilerim sağlam! 🚢";
-  if (gameType === "wordle") return "Harfleri iyi analiz et, 5 harf seni bekliyor! 🔤";
-  if (gameType === "sudoku") return "Satır ve sütunlara dikkat, hızlanıyorum! 🧠";
-  return "Güzel gidiyor, bakalım kim kazanacak! 👏";
-}
-
 function checkTTTWinner(board) {
   const lines = [
     [0, 1, 2], [3, 4, 5], [6, 7, 8],
@@ -485,7 +831,6 @@ export default function App() {
   const [reportTargetUser, setReportTargetUser] = useState(null);
   const [reportReason, setReportReason] = useState("");
 
-  // Blöf çoklu davet & senkronize masa bekleme odası
   const [bluffTableId, setBluffTableId] = useState(null);
   const [bluffLobbyOpen, setBluffLobbyOpen] = useState(false);
   const [bluffInvitedIds, setBluffInvitedIds] = useState({});
@@ -496,9 +841,8 @@ export default function App() {
   const [outgoingInvite, setOutgoingInvite] = useState(null);
   const [noticeBanner, setNoticeBanner] = useState(null);
   const [selectedTargetUser, setSelectedTargetUser] = useState(null);
-  const [selectedGameForInvite, setSelectedGameForInvite] = useState("bluff");
+  const [selectedGameForInvite, setSelectedGameForInvite] = useState("kelimelik");
 
-  // Çıkış onayı & lobiye çıkınca geri dönülebilir maç kaydı
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
   const [resumableMatch, setResumableMatch] = useState(() => {
     if (typeof window === "undefined") return null;
@@ -549,6 +893,19 @@ export default function App() {
   const [bluffState, setBluffState] = useState(null);
   const [bluffClueInput, setBluffClueInput] = useState("");
   const [bluffSelectedSuspect, setBluffSelectedSuspect] = useState(null);
+
+  // Kelimelik state
+  const [klBoard, setKlBoard] = useState(() => createInitialKelimelikBoard());
+  const [klRack, setKlRack] = useState(() => drawKelimelikRack(7));
+  const [klDraftCells, setKlDraftCells] = useState([]);
+  const [klSelectedTilePos, setKlSelectedTilePos] = useState([3, 2]);
+  const [klMyScore, setKlMyScore] = useState(0);
+  const [klOppScore, setKlOppScore] = useState(0);
+  const [klTurn, setKlTurn] = useState("me");
+  const [klRound, setKlRound] = useState(1);
+  const [klStatus, setKlStatus] = useState("Tahtada boş kare seç ve alttan harf koyarak kelime kur!");
+  const [klWinner, setKlWinner] = useState(null);
+  const [klLastWordInfo, setKlLastWordInfo] = useState(null);
 
   // Amiral Battı state
   const [myShipGrid, setMyShipGrid] = useState(() => autoPlaceShips(6));
@@ -606,7 +963,9 @@ export default function App() {
   const botTttTimerRef = useRef(null);
   const botWordTimerRef = useRef(null);
   const botSudokuTimerRef = useRef(null);
+  const botKlTimerRef = useRef(null);
   const bluffBotTimerRef = useRef(null);
+  const botChatTimerRef = useRef(null);
   const processedLiveRoundRef = useRef(0);
   const awardedMatchIdRef = useRef(null);
   const leftNoticeShownRef = useRef(false);
@@ -644,30 +1003,14 @@ export default function App() {
   }, []);
 
   function clearAllGameTimers() {
-    if (rpsTimerRef.current) {
-      clearTimeout(rpsTimerRef.current);
-      rpsTimerRef.current = null;
-    }
-    if (botBsTimerRef.current) {
-      clearTimeout(botBsTimerRef.current);
-      botBsTimerRef.current = null;
-    }
-    if (botTttTimerRef.current) {
-      clearTimeout(botTttTimerRef.current);
-      botTttTimerRef.current = null;
-    }
-    if (botWordTimerRef.current) {
-      clearTimeout(botWordTimerRef.current);
-      botWordTimerRef.current = null;
-    }
-    if (botSudokuTimerRef.current) {
-      clearTimeout(botSudokuTimerRef.current);
-      botSudokuTimerRef.current = null;
-    }
-    if (bluffBotTimerRef.current) {
-      clearTimeout(bluffBotTimerRef.current);
-      bluffBotTimerRef.current = null;
-    }
+    if (rpsTimerRef.current) { clearTimeout(rpsTimerRef.current); rpsTimerRef.current = null; }
+    if (botBsTimerRef.current) { clearTimeout(botBsTimerRef.current); botBsTimerRef.current = null; }
+    if (botTttTimerRef.current) { clearTimeout(botTttTimerRef.current); botTttTimerRef.current = null; }
+    if (botWordTimerRef.current) { clearTimeout(botWordTimerRef.current); botWordTimerRef.current = null; }
+    if (botSudokuTimerRef.current) { clearTimeout(botSudokuTimerRef.current); botSudokuTimerRef.current = null; }
+    if (botKlTimerRef.current) { clearTimeout(botKlTimerRef.current); botKlTimerRef.current = null; }
+    if (bluffBotTimerRef.current) { clearTimeout(bluffBotTimerRef.current); bluffBotTimerRef.current = null; }
+    if (botChatTimerRef.current) { clearTimeout(botChatTimerRef.current); botChatTimerRef.current = null; }
   }
 
   function showNotice(title, text) {
@@ -995,13 +1338,26 @@ export default function App() {
         unsubGlobal();
       };
     } else {
-      setUsers([
-        { id: "seed_1", name: "Zeynep", status: "online", wins: 4, lastSeenAt: Date.now() - 1000 * 60 * 18 },
-        { id: "demo_mert", name: "Mert", status: "online", wins: 2, lastSeenAt: Date.now() - 1000 * 60 * 42 },
-        { id: "demo_eda", name: "Eda", status: "in_game", wins: 6, lastSeenAt: Date.now() - 1000 * 60 * 9 },
-      ]);
+      setUsers([]);
     }
   }, [enteredLobby, nickname, myId, myStatus, myWins, isFdAdmin, globalChatOpen, upsertKnownPlayer]);
+
+  const activeLobbyPlayers = useMemo(() => {
+    const map = new Map();
+    LOBBY_BOT_PLAYERS.forEach((bot) => {
+      map.set(bot.id, { ...bot, isBot: true });
+    });
+    users.forEach((u) => {
+      if (u && u.id && u.id !== myId) {
+        map.set(u.id, {
+          ...u,
+          isBot: Boolean(u.isBot || LOBBY_BOT_ID_SET.has(u.id)),
+          status: u.status || "online",
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [users, myId]);
 
   useEffect(() => {
     if (!dbRef.current || !enteredLobby || users.length === 0) return;
@@ -1163,7 +1519,6 @@ export default function App() {
     },
     [myId, activeMatch, syncBluffState]
   );
-
   useEffect(() => {
     if (!activeMatch || activeMatch.gameType !== "bluff" || !bluffState) return;
     if (!activeMatch.isHost) return;
@@ -1336,6 +1691,22 @@ export default function App() {
               adjustMyGlobalWins(myDelta, `${activeMatch.roomId}_bluff_sync_r${gs.bluff.round}_${myId}`);
             }
           }
+        } else if (activeMatch.gameType === "kelimelik" && gs.kelimelik) {
+          const kl = gs.kelimelik;
+          if (Array.isArray(kl.board)) setKlBoard(kl.board);
+          setKlMyScore(isP1 ? Number(kl.p1Score || 0) : Number(kl.p2Score || 0));
+          setKlOppScore(isP1 ? Number(kl.p2Score || 0) : Number(kl.p1Score || 0));
+          setKlRound(Number(kl.round || 1));
+          const turnSide = kl.turn || "p1";
+          const myTurnNow = (isP1 && turnSide === "p1") || (!isP1 && turnSide === "p2");
+          setKlTurn(myTurnNow ? "me" : "opp");
+          if (kl.lastWordInfo) setKlLastWordInfo(kl.lastWordInfo);
+          if (kl.status) setKlStatus(kl.status);
+          if (kl.winner) {
+            const wonMe = (isP1 && kl.winner === "p1") || (!isP1 && kl.winner === "p2");
+            setKlWinner(wonMe ? "me" : kl.winner === "draw" ? "draw" : "opp");
+            if (wonMe) awardWinPoint(`${activeMatch.roomId}_kl_win`);
+          }
         } else if (activeMatch.gameType === "battleship") {
           const p1Ships = Array.isArray(gs.p1Ships) ? gs.p1Ships : autoPlaceShips(6);
           const p2Ships = Array.isArray(gs.p2Ships) ? gs.p2Ships : autoPlaceShips(6);
@@ -1499,7 +1870,6 @@ export default function App() {
     return () => unsub();
   }, [activeMatch, myId, matchDrawerOpen]);
 
-  // Tekli davet (Blöf dışındaki 5 oyun)
   useEffect(() => {
     if (!dbRef.current || !outgoingInvite || !outgoingInvite.toId) {
       acceptedHandledRef.current = false;
@@ -1516,7 +1886,7 @@ export default function App() {
         const rId = val.roomId;
         setOutgoingInvite(null);
         remove(targetInviteRef);
-        startMatch(targetOpp, gId, false, rId, true);
+        startMatch(targetOpp, gId, false, rId, true, true);
       } else if (val.status === "declined") {
         const declName = outgoingInvite.toName;
         const declGame = outgoingInvite.gameName;
@@ -1531,7 +1901,6 @@ export default function App() {
     return () => unsub();
   }, [outgoingInvite]);
 
-  // Masa sahibi: ortak bluff_tables/${bluffTableId}/members düğümünden katılımcıları canlı dinle
   useEffect(() => {
     if (!dbRef.current || !bluffLobbyOpen || !bluffTableId) return;
     const membersRef = ref(dbRef.current, `bluff_tables/${bluffTableId}/members`);
@@ -1550,7 +1919,6 @@ export default function App() {
     return () => unsub();
   }, [bluffLobbyOpen, bluffTableId, myId]);
 
-  // Masa sahibi: davet edilenlerin reddetme yanıtlarını dinle
   useEffect(() => {
     const invitedEntries = Object.entries(bluffInvitedIds || {});
     if (invitedEntries.length === 0) return;
@@ -1560,7 +1928,7 @@ export default function App() {
       if (pendingIds.length === 0) return;
       const timer = setTimeout(() => {
         pendingIds.forEach((uid) => {
-          const found = users.find((u) => u.id === uid);
+          const found = activeLobbyPlayers.find((u) => u.id === uid);
           if (found) {
             setBluffInvitedIds((prev) => ({ ...prev, [uid]: "accepted" }));
             setBluffJoinedMembers((prev) =>
@@ -1596,9 +1964,8 @@ export default function App() {
     return () => {
       unsubs.forEach((fn) => fn && fn());
     };
-  }, [bluffInvitedIds, users, myId]);
+  }, [bluffInvitedIds, activeLobbyPlayers, myId]);
 
-  // Davet edilen oyuncu: katıldığı Blöf masasını dinle; masa sahibi Başlat deyince otomatik maça geç
   useEffect(() => {
     if (!dbRef.current || !joinedBluffTable || !joinedBluffTable.tableId) return;
     const tableRef = ref(dbRef.current, `bluff_tables/${joinedBluffTable.tableId}`);
@@ -1648,7 +2015,7 @@ export default function App() {
           },
         ]);
         setMatchUnread(0);
-        setMatchDrawerOpen(false);
+        setMatchDrawerOpen(true);
         setFloatingReaction(null);
 
         setActiveMatch({
@@ -1662,6 +2029,229 @@ export default function App() {
     });
     return () => unsub();
   }, [joinedBluffTable]);
+
+  function triggerBotKelimelikTurn(currentBoard, currentMyScore, currentOppScore, currentRound) {
+    if (botKlTimerRef.current) clearTimeout(botKlTimerRef.current);
+    botKlTimerRef.current = setTimeout(() => {
+      const nextBoard = currentBoard.map((row) => row.map((cell) => (cell ? { ...cell } : null)));
+      const candidateWords = KELIMELIK_BOT_WORDS.filter((w) => Array.from(w).length >= 3);
+      const chosenWord = candidateWords[Math.floor(Math.random() * candidateWords.length)] || "KALE";
+      const chars = Array.from(chosenWord);
+
+      let placed = false;
+      for (let r = 0; r < KELIMELIK_SIZE && !placed; r++) {
+        for (let c = 0; c <= KELIMELIK_SIZE - chars.length && !placed; c++) {
+          let touches = false;
+          let canFit = true;
+          for (let k = 0; k < chars.length; k++) {
+            const existing = nextBoard[r][c + k];
+            if (existing && existing.letter !== chars[k]) {
+              canFit = false;
+              break;
+            }
+            if (existing) touches = true;
+            const adj = [
+              [r - 1, c + k],
+              [r + 1, c + k],
+              [r, c + k - 1],
+              [r, c + k + 1],
+            ];
+            for (const [ar, ac] of adj) {
+              if (
+                ar >= 0 &&
+                ar < KELIMELIK_SIZE &&
+                ac >= 0 &&
+                ac < KELIMELIK_SIZE &&
+                nextBoard[ar][ac]?.letter
+              ) {
+                touches = true;
+              }
+            }
+          }
+          if (canFit && touches) {
+            let earned = 0;
+            for (let k = 0; k < chars.length; k++) {
+              const pt = getLetterPoint(chars[k]);
+              const bonus = KELIMELIK_BONUS_MAP[`${r},${c + k}`];
+              earned += bonus === "H2" ? pt * 2 : pt;
+              nextBoard[r][c + k] = {
+                letter: chars[k],
+                points: pt,
+                locked: true,
+              };
+            }
+            const nextOpp = currentOppScore + earned;
+            setKlBoard(nextBoard);
+            setKlOppScore(nextOpp);
+            setKlLastWordInfo({ by: activeMatch?.opponent?.name || "Rakip", word: chosenWord, points: earned });
+            if (nextOpp >= 40) {
+              setKlWinner("opp");
+              setKlStatus(`Rakip "${chosenWord}" ile +${earned} puan aldı ve 40 puana ulaştı!`);
+            } else {
+              setKlTurn("me");
+              setKlRound(currentRound + 1);
+              setKlStatus(`Rakip "${chosenWord}" (+${earned}p) oynadı. Sıra sende!`);
+            }
+            placed = true;
+          }
+        }
+      }
+
+      if (!placed) {
+        setKlTurn("me");
+        setKlRound(currentRound + 1);
+        setKlStatus("Rakip pas geçti. Sıra sende!");
+      }
+    }, 850);
+  }
+
+  function handleKlPlaceLetter(rackIdx) {
+    if (klWinner || klTurn !== "me") return;
+    const letter = klRack[rackIdx];
+    if (!letter) return;
+
+    const [sr, sc] = klSelectedTilePos;
+    let targetR = sr;
+    let targetC = sc;
+
+    const isOccupiedOrDraft = (r, c) =>
+      Boolean(klBoard[r]?.[c]?.letter) || klDraftCells.some((d) => d.r === r && d.c === c);
+
+    if (isOccupiedOrDraft(targetR, targetC)) {
+      let found = false;
+      for (let r = 0; r < KELIMELIK_SIZE && !found; r++) {
+        for (let c = 0; c < KELIMELIK_SIZE && !found; c++) {
+          if (!isOccupiedOrDraft(r, c)) {
+            targetR = r;
+            targetC = c;
+            found = true;
+          }
+        }
+      }
+      if (!found) return;
+    }
+
+    const nextDraft = [
+      ...klDraftCells,
+      { r: targetR, c: targetC, letter, rackIdx },
+    ];
+    const nextRack = klRack.map((item, idx) => (idx === rackIdx ? null : item));
+
+    setKlDraftCells(nextDraft);
+    setKlRack(nextRack);
+
+    if (targetC + 1 < KELIMELIK_SIZE && !isOccupiedOrDraft(targetR, targetC + 1)) {
+      setKlSelectedTilePos([targetR, targetC + 1]);
+    }
+  }
+
+  function handleKlUndoDraft() {
+    if (klDraftCells.length === 0) return;
+    const last = klDraftCells[klDraftCells.length - 1];
+    setKlDraftCells((prev) => prev.slice(0, -1));
+    setKlRack((prev) =>
+      prev.map((item, idx) => (idx === last.rackIdx ? last.letter : item))
+    );
+    setKlSelectedTilePos([last.r, last.c]);
+    setKlStatus("Son yerleştirilen harf geri alındı.");
+  }
+
+  function handleKlShuffleRack() {
+    setKlRack((prev) => {
+      const copy = [...prev];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    });
+  }
+
+  function handleKlPassTurn() {
+    if (klWinner || klTurn !== "me") return;
+    handleKlUndoDraft();
+    const freshRack = drawKelimelikRack(7);
+    setKlRack(freshRack);
+    const nextRound = klRound + 1;
+
+    if (activeMatch && !activeMatch.isBot && dbRef.current) {
+      setKlTurn("opp");
+      setKlRound(nextRound);
+      setKlStatus("Pas geçtin. Rakibin hamlesi bekleniyor...");
+      update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState/kelimelik`), {
+        turn: activeMatch.isHost ? "p2" : "p1",
+        round: nextRound,
+        status: `${nickname.trim()} pas geçti. Sıra sende!`,
+      });
+      return;
+    }
+
+    setKlTurn("opp");
+    setKlRound(nextRound);
+    setKlStatus("Pas geçtin, harflerin yenilendi. Rakip oynuyor...");
+    triggerBotKelimelikTurn(klBoard, klMyScore, klOppScore, nextRound);
+  }
+
+  function handleKlSubmitWord() {
+    if (klWinner || klTurn !== "me") return;
+    const evalRes = evaluateKelimelikPlacement(klBoard, klDraftCells);
+    if (!evalRes.ok) {
+      setKlStatus(evalRes.reason);
+      return;
+    }
+
+    const nextBoard = klBoard.map((row) => row.map((cell) => (cell ? { ...cell } : null)));
+    klDraftCells.forEach((d) => {
+      nextBoard[d.r][d.c] = {
+        letter: d.letter,
+        points: getLetterPoint(d.letter),
+        locked: true,
+      };
+    });
+
+    const nextMyScore = klMyScore + evalRes.points;
+    const nextRack = drawKelimelikRack(7);
+    const nextRound = klRound + 1;
+
+    setKlBoard(nextBoard);
+    setKlDraftCells([]);
+    setKlRack(nextRack);
+    setKlMyScore(nextMyScore);
+    setKlLastWordInfo({ by: nickname.trim(), word: evalRes.word, points: evalRes.points });
+
+    const wonNow = nextMyScore >= 40;
+    if (wonNow) {
+      setKlWinner("me");
+      setKlStatus(`"${evalRes.word}" ile +${evalRes.points} puan! 40 puana ulaştın ve kazandın! (+1 Puan)`);
+      awardWinPoint(`${activeMatch?.roomId}_kl_win_${nextMyScore}`);
+    } else {
+      setKlTurn("opp");
+      setKlRound(nextRound);
+      setKlStatus(`"${evalRes.word}" (+${evalRes.points} puan) eklendi! Sıra rakipte...`);
+    }
+
+    if (activeMatch && !activeMatch.isBot && dbRef.current) {
+      const isP1 = activeMatch.isHost;
+      update(ref(dbRef.current, `matches/${activeMatch.roomId}/gameState/kelimelik`), {
+        board: nextBoard,
+        p1Score: isP1 ? nextMyScore : klOppScore,
+        p2Score: isP1 ? klOppScore : nextMyScore,
+        turn: wonNow ? (isP1 ? "p1" : "p2") : isP1 ? "p2" : "p1",
+        round: nextRound,
+        winner: wonNow ? (isP1 ? "p1" : "p2") : null,
+        lastWordInfo: { by: nickname.trim(), word: evalRes.word, points: evalRes.points },
+        status: wonNow
+          ? `${nickname.trim()} "${evalRes.word}" ile oyunu kazandı!`
+          : `${nickname.trim()} "${evalRes.word}" (+${evalRes.points}p) oynadı. Sıra sende!`,
+      });
+      return;
+    }
+
+    if (!wonNow && activeMatch?.isBot) {
+      triggerBotKelimelikTurn(nextBoard, nextMyScore, klOppScore, nextRound);
+    }
+  }
+
   function openBluffTable(initialInvitee = null) {
     setSelectedTargetUser(null);
     const newTableId = `bt_${myId}_${Date.now()}`;
@@ -1685,7 +2275,7 @@ export default function App() {
 
     if (initialInvitee && initialInvitee.id) {
       setBluffInvitedIds({ [initialInvitee.id]: "pending" });
-      if (dbRef.current) {
+      if (dbRef.current && !initialInvitee.isBot) {
         set(ref(dbRef.current, `invites/${initialInvitee.id}`), {
           fromId: myId,
           fromName: hostName,
@@ -1737,7 +2327,7 @@ export default function App() {
     }
 
     setBluffInvitedIds((prev) => ({ ...prev, [targetUser.id]: "pending" }));
-    if (dbRef.current) {
+    if (dbRef.current && !targetUser.isBot) {
       set(ref(dbRef.current, `invites/${targetUser.id}`), {
         fromId: myId,
         fromName: nickname.trim(),
@@ -1763,11 +2353,12 @@ export default function App() {
       }
     });
 
-    const botPool = [
-      { id: "bot_bluff_1", name: "Blöf Botu Can", isBot: true, score: 0 },
-      { id: "bot_bluff_2", name: "Blöf Botu Ela", isBot: true, score: 0 },
-      { id: "bot_bluff_3", name: "Blöf Botu Mert", isBot: true, score: 0 },
-    ];
+    const botPool = LOBBY_BOT_PLAYERS.slice(0, 3).map((b) => ({
+      id: b.id,
+      name: b.name,
+      isBot: true,
+      score: 0,
+    }));
     let idx = 0;
     while (list.length < 3 && idx < botPool.length) {
       list.push(botPool[idx]);
@@ -1780,9 +2371,10 @@ export default function App() {
     const participants = buildBluffParticipantsFromTable(bluffJoinedMembers);
     const hasOnlyBotsAsOthers = participants.every((p) => p.id === myId || p.isBot);
     const firstOpp =
-      participants.find((p) => p.id !== myId && !p.isBot) || {
-        id: "bot_arena",
-        name: "Blöf Masası",
+      participants.find((p) => p.id !== myId && !p.isBot) ||
+      participants.find((p) => p.id !== myId) || {
+        id: "bot_efe",
+        name: "Efe",
       };
     const roomId = `bluff_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const initialBluff = createInitialBluffState(participants, 1, {});
@@ -1812,7 +2404,7 @@ export default function App() {
       },
     ]);
     setMatchUnread(0);
-    setMatchDrawerOpen(false);
+    setMatchDrawerOpen(true);
     setFloatingReaction(null);
 
     setActiveMatch({
@@ -1855,12 +2447,26 @@ export default function App() {
     isBotMatch = false,
     roomIdForSync = null,
     isHostForSync = true,
-    opponentObj = null
+    opponentObj = null,
+    openChatByDefault = false
   ) {
     clearAllGameTimers();
     processedLiveRoundRef.current = 0;
     awardedMatchIdRef.current = null;
     leftNoticeShownRef.current = false;
+
+    const freshKlBoard = createInitialKelimelikBoard();
+    setKlBoard(freshKlBoard);
+    setKlRack(drawKelimelikRack(7));
+    setKlDraftCells([]);
+    setKlSelectedTilePos([3, 2]);
+    setKlMyScore(0);
+    setKlOppScore(0);
+    setKlTurn("me");
+    setKlRound(1);
+    setKlStatus("Tahtada boş kare seç ve alttan harf koyarak kelime kur! (Hedef: 40 puan)");
+    setKlWinner(null);
+    setKlLastWordInfo(null);
 
     const freshMyShips = autoPlaceShips(6);
     const freshOppShips = autoPlaceShips(6);
@@ -1909,7 +2515,7 @@ export default function App() {
     const existingHumans =
       bluffState && Array.isArray(bluffState.players)
         ? bluffState.players.filter((p) => !p.isBot && p.id !== myId).map((p) => ({ id: p.id, name: p.name }))
-        : !isBotMatch && opponentObj && opponentObj.id && opponentObj.id !== "bot_arena"
+        : !isBotMatch && opponentObj && opponentObj.id && !LOBBY_BOT_ID_SET.has(opponentObj.id)
         ? [{ id: opponentObj.id, name: opponentObj.name }]
         : [];
     const participants = buildBluffParticipantsFromTable(existingHumans);
@@ -1922,6 +2528,16 @@ export default function App() {
       update(ref(dbRef.current, `matches/${roomIdForSync}/gameState`), {
         phase: "picking",
         bluff: initialBluff,
+        kelimelik: {
+          board: freshKlBoard,
+          p1Score: 0,
+          p2Score: 0,
+          turn: "p1",
+          round: 1,
+          winner: null,
+          lastWordInfo: null,
+          status: "Tahtada boş kare seç ve alttan harf koyarak kelime kur!",
+        },
         bsTurn: "p1",
         bsWinner: null,
         bsStatus: "Sıra sende! Düşman denizinde bir kare seç.",
@@ -1953,7 +2569,7 @@ export default function App() {
       },
     ]);
     setMatchUnread(0);
-    setMatchDrawerOpen(false);
+    setMatchDrawerOpen(Boolean(openChatByDefault));
     setFloatingReaction(null);
 
     if (isBotMatch && gameType === "sudoku") {
@@ -1963,16 +2579,31 @@ export default function App() {
     return initialBluff;
   }
 
-  function startMatch(opponent, gameType, isBot = false, customRoomId = null, isHost = true) {
+  function startMatch(
+    opponent,
+    gameType,
+    isBot = false,
+    customRoomId = null,
+    isHost = true,
+    openChatByDefault = false
+  ) {
+    const resolvedIsBot = Boolean(isBot || opponent?.isBot || LOBBY_BOT_ID_SET.has(opponent?.id));
     const roomId = customRoomId || `room_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const matchObj = {
       roomId,
       gameType,
-      isBot,
+      isBot: resolvedIsBot,
       isHost,
       opponent: { id: opponent.id, name: opponent.name },
     };
-    const initialBluff = resetAllGameStates(gameType, isBot, roomId, isHost, opponent);
+    const initialBluff = resetAllGameStates(
+      gameType,
+      resolvedIsBot,
+      roomId,
+      isHost,
+      opponent,
+      openChatByDefault
+    );
     setResumableMatch(null);
     setExitConfirmOpen(false);
     setActiveMatch(matchObj);
@@ -1980,7 +2611,7 @@ export default function App() {
     setOutgoingInvite(null);
     setIncomingInvite(null);
 
-    if (dbRef.current && !isBot && isHost) {
+    if (dbRef.current && !resolvedIsBot && isHost) {
       set(ref(dbRef.current, `matches/${roomId}`), {
         roomId,
         gameType,
@@ -1999,6 +2630,16 @@ export default function App() {
         gameState: {
           phase: "picking",
           bluff: initialBluff,
+          kelimelik: {
+            board: createInitialKelimelikBoard(),
+            p1Score: 0,
+            p2Score: 0,
+            turn: "p1",
+            round: 1,
+            winner: null,
+            lastWordInfo: null,
+            status: "Tahtada boş kare seç ve alttan harf koyarak kelime kur!",
+          },
           bsTurn: "p1",
           bsWinner: null,
           bsStatus: "Sıra sende! Düşman denizinde bir kare seç.",
@@ -2022,9 +2663,53 @@ export default function App() {
     }
   }
 
+  function handleRandomMatch() {
+    const chosenGame =
+      RANDOM_DUEL_GAME_IDS[Math.floor(Math.random() * RANDOM_DUEL_GAME_IDS.length)];
+    const availableHumans = users.filter(
+      (u) =>
+        u &&
+        u.id &&
+        u.id !== myId &&
+        !u.isBot &&
+        !LOBBY_BOT_ID_SET.has(u.id) &&
+        (u.status || "online") === "online"
+    );
+
+    if (availableHumans.length > 0 && dbRef.current) {
+      const pickedHuman =
+        availableHumans[Math.floor(Math.random() * availableHumans.length)];
+      const gameMeta = GAMES_META.find((g) => g.id === chosenGame) || GAMES_META[0];
+      acceptedHandledRef.current = false;
+      const invitePayload = {
+        fromId: myId,
+        fromName: nickname.trim(),
+        toId: pickedHuman.id,
+        toName: pickedHuman.name,
+        gameId: gameMeta.id,
+        gameName: gameMeta.name,
+        openChat: true,
+        status: "pending",
+        ts: Date.now(),
+      };
+      set(ref(dbRef.current, `invites/${pickedHuman.id}`), invitePayload);
+      setOutgoingInvite(invitePayload);
+      return;
+    }
+
+    const pickedBot =
+      LOBBY_BOT_PLAYERS[Math.floor(Math.random() * LOBBY_BOT_PLAYERS.length)];
+    startMatch(pickedBot, chosenGame, true, null, true, true);
+  }
+
   function sendGameInvite(targetUser, gameId) {
     if (gameId === "bluff") {
       openBluffTable(targetUser);
+      return;
+    }
+
+    if (targetUser.isBot || LOBBY_BOT_ID_SET.has(targetUser.id)) {
+      startMatch(targetUser, gameId, true, null, true, false);
       return;
     }
 
@@ -2046,9 +2731,7 @@ export default function App() {
       setOutgoingInvite(invitePayload);
       setSelectedTargetUser(null);
     } else {
-      setOutgoingInvite(invitePayload);
-      setSelectedTargetUser(null);
-      setTimeout(() => startMatch(targetUser, gameMeta.id, false, `local_${Date.now()}`, true), 900);
+      startMatch(targetUser, gameMeta.id, false, `local_${Date.now()}`, true, false);
     }
   }
 
@@ -2096,11 +2779,12 @@ export default function App() {
     const roomId = `room_${Date.now()}`;
     const inviter = { id: incomingInvite.fromId, name: incomingInvite.fromName };
     const gameId = incomingInvite.gameId;
+    const shouldOpenChat = Boolean(incomingInvite.openChat);
     if (dbRef.current) {
       update(ref(dbRef.current, `invites/${myId}`), { status: "accepted", roomId });
     }
     setIncomingInvite(null);
-    startMatch(inviter, gameId, false, roomId, false);
+    startMatch(inviter, gameId, false, roomId, false, shouldOpenChat);
   }
 
   function declineIncomingInvite() {
@@ -2138,13 +2822,13 @@ export default function App() {
     const restored = {
       roomId: resumableMatch.roomId,
       gameType: resumableMatch.gameType,
-      isBot: Boolean(resumableMatch.isBot),
+      isBot: Boolean(resumableMatch.isBot || LOBBY_BOT_ID_SET.has(resumableMatch.opponent?.id)),
       isHost: Boolean(resumableMatch.isHost),
-      opponent: resumableMatch.opponent || { id: "bot_arena", name: "Arena Botu" },
+      opponent: resumableMatch.opponent || { id: "bot_efe", name: "Efe" },
     };
     if (restored.gameType === "bluff" && !bluffState) {
       const participants = buildBluffParticipantsFromTable(
-        !restored.isBot && restored.opponent?.id !== "bot_arena"
+        !restored.isBot && restored.opponent?.id && !LOBBY_BOT_ID_SET.has(restored.opponent.id)
           ? [{ id: restored.opponent.id, name: restored.opponent.name }]
           : []
       );
@@ -2167,7 +2851,14 @@ export default function App() {
   function handleRequestNewMatch(gameType) {
     if (!activeMatch) return;
     if (activeMatch.isBot) {
-      resetAllGameStates(gameType, true, activeMatch.roomId, activeMatch.isHost, activeMatch.opponent);
+      resetAllGameStates(
+        gameType,
+        true,
+        activeMatch.roomId,
+        activeMatch.isHost,
+        activeMatch.opponent,
+        matchDrawerOpen
+      );
       return;
     }
     const targetOpp = activeMatch.opponent;
@@ -2182,7 +2873,6 @@ export default function App() {
     sendGameInvite(targetOpp, gameType);
   }
 
-  // Blöf oyuncu aksiyonları
   function handleBluffSelectSecretWord(chosenWord) {
     if (!bluffState || bluffState.phase !== "selecting_word" || bluffState.starterId !== myId) return;
     syncBluffState({
@@ -2387,6 +3077,7 @@ export default function App() {
     if (!dmTarget) return;
     const text = dmInput.trim();
     if (!text) return;
+    const peerSnapshot = dmTarget;
     const msg = {
       id: "dm_" + Date.now(),
       senderId: myId,
@@ -2395,13 +3086,36 @@ export default function App() {
       ts: Date.now(),
     };
     setDmInput("");
+
+    if (peerSnapshot.isBot || LOBBY_BOT_ID_SET.has(peerSnapshot.id)) {
+      setDmMessagesByPeer((prev) => ({
+        ...prev,
+        [peerSnapshot.id]: [...(prev[peerSnapshot.id] || []), msg],
+      }));
+      const delayMs = computeHumanBotDelayMs(text);
+      setTimeout(() => {
+        const replyMsg = {
+          id: "dm_b_" + Date.now(),
+          senderId: peerSnapshot.id,
+          senderName: peerSnapshot.name,
+          text: getBotChatReply(text, "general"),
+          ts: Date.now(),
+        };
+        setDmMessagesByPeer((prev) => ({
+          ...prev,
+          [peerSnapshot.id]: [...(prev[peerSnapshot.id] || []), replyMsg],
+        }));
+      }, delayMs);
+      return;
+    }
+
     if (dbRef.current) {
-      const threadId = [myId, dmTarget.id].sort().join("__");
+      const threadId = [myId, peerSnapshot.id].sort().join("__");
       push(ref(dbRef.current, `chats/dm/${threadId}`), msg);
     } else {
       setDmMessagesByPeer((prev) => ({
         ...prev,
-        [dmTarget.id]: [...(prev[dmTarget.id] || []), msg],
+        [peerSnapshot.id]: [...(prev[peerSnapshot.id] || []), msg],
       }));
     }
   }
@@ -2420,22 +3134,28 @@ export default function App() {
     setMatchMessages(nextList);
     setMatchInput("");
 
-    if (dbRef.current && !activeMatch.isBot) {
-      update(ref(dbRef.current, `matches/${activeMatch.roomId}`), {
-        chatList: nextList.slice(-60),
-      });
-    } else if (activeMatch.isBot) {
-      setTimeout(() => {
+    if (activeMatch.isBot || LOBBY_BOT_ID_SET.has(activeMatch.opponent?.id)) {
+      if (botChatTimerRef.current) clearTimeout(botChatTimerRef.current);
+      const delayMs = computeHumanBotDelayMs(text);
+      const replyText = getBotChatReply(text, activeMatch.gameType);
+      botChatTimerRef.current = setTimeout(() => {
         const botMsg = {
-          id: "mc_bot_" + Date.now(),
-          senderId: "bot",
+          id: "mc_bot_" + Date.now() + "_" + Math.random().toString(36).slice(2, 4),
+          senderId: activeMatch.opponent.id || "bot",
           senderName: activeMatch.opponent.name,
-          text: getBotChatReply(text, activeMatch.gameType),
+          text: replyText,
           ts: Date.now(),
         };
         setMatchMessages((prev) => [...prev, botMsg]);
         if (!matchDrawerOpen) setMatchUnread((u) => u + 1);
-      }, 750);
+      }, delayMs);
+      return;
+    }
+
+    if (dbRef.current) {
+      update(ref(dbRef.current, `matches/${activeMatch.roomId}`), {
+        chatList: nextList.slice(-60),
+      });
     }
   }
 
@@ -2891,10 +3611,10 @@ export default function App() {
   }, [globalMessages]);
 
   const onlineIdSet = useMemo(() => {
-    const s = new Set(users.map((u) => u.id));
+    const s = new Set(activeLobbyPlayers.map((u) => u.id));
     if (enteredLobby) s.add(myId);
     return s;
-  }, [users, enteredLobby, myId]);
+  }, [activeLobbyPlayers, enteredLobby, myId]);
 
   const combinedPlayersForLists = useMemo(() => {
     const cleanName = isReservedFdName(nickname) ? "FD" : nickname.trim();
@@ -2968,7 +3688,7 @@ export default function App() {
             </div>
             <h1 className="text-3xl font-extrabold tracking-tight text-white">Düello Arenası</h1>
             <p className="text-sm text-slate-400">
-              Aktif oyuncularla eşleş, sohbet et ve 6 farklı oyunda yarış.
+              Aktif oyuncularla eşleş, sohbet et ve 7 farklı oyunda yarış.
             </p>
           </div>
 
@@ -3044,8 +3764,8 @@ export default function App() {
 
           <div className="grid grid-cols-3 gap-2 text-center text-xs text-slate-400">
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
-              <div className="font-semibold text-slate-200">6 Oyun</div>
-              <div>Blöf, Amiral Battı...</div>
+              <div className="font-semibold text-slate-200">7 Oyun</div>
+              <div>Kelimelik, Blöf...</div>
             </div>
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
               <div className="font-semibold text-slate-200">1 Saatlik Sohbet</div>
@@ -3102,11 +3822,6 @@ export default function App() {
               <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">
                 {gameInfo.name}
               </span>
-              {activeMatch.isBot && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  Bot
-                </span>
-              )}
             </div>
             <p className="text-sm font-semibold text-white">
               {activeMatch.gameType === "bluff"
@@ -3123,7 +3838,8 @@ export default function App() {
                   activeMatch.isBot,
                   activeMatch.roomId,
                   activeMatch.isHost,
-                  activeMatch.opponent
+                  activeMatch.opponent,
+                  matchDrawerOpen
                 )
               }
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200"
@@ -3186,313 +3902,400 @@ export default function App() {
         </div>
 
         <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4">
+          {activeMatch.gameType === "kelimelik" && (
+            <div className="space-y-3">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2">
+                <div className="flex items-center justify-between text-center">
+                  <div className="flex-1">
+                    <div className="text-[11px] text-slate-400">Sen</div>
+                    <div className="text-2xl font-extrabold text-indigo-400">{klMyScore}</div>
+                  </div>
+                  <div className="px-2.5 py-1 rounded-full bg-slate-800 text-[11px] font-bold text-amber-300">
+                    TUR {klRound} • HEDEF 40
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[11px] text-slate-400">{activeMatch.opponent.name}</div>
+                    <div className="text-2xl font-extrabold text-rose-400">{klOppScore}</div>
+                  </div>
+                </div>
+
+                <p className="text-xs text-center font-medium text-slate-200">{klStatus}</p>
+
+                {klLastWordInfo && (
+                  <div className="text-[11px] text-center text-emerald-300 bg-slate-950/70 rounded-xl py-1 px-2 border border-slate-800">
+                    Son Kelime: <strong>{klLastWordInfo.word}</strong> ({klLastWordInfo.by} • +{klLastWordInfo.points}p)
+                  </div>
+                )}
+
+                {klWinner && (
+                  <div className="pt-1 text-center space-y-2">
+                    <div className="text-sm font-extrabold text-emerald-400">
+                      {klWinner === "me"
+                        ? "KELİMELİK DÜELLOSUNU KAZANDIN! (+1 Puan) 🎉"
+                        : klWinner === "draw"
+                        ? "Berabere!"
+                        : "Rakip Kazandı!"}
+                    </div>
+                    <button
+                      onClick={() => handleRequestNewMatch("kelimelik")}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                    >
+                      {activeMatch.isBot ? "Yeni Kelimelik Maçı" : "Yeni Maç Daveti Gönder"}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-7 gap-1 bg-slate-900 p-2 rounded-2xl border border-slate-800">
+                {klBoard.map((row, r) =>
+                  row.map((cell, c) => {
+                    const draftObj = klDraftCells.find((d) => d.r === r && d.c === c);
+                    const displayLetter = draftObj ? draftObj.letter : cell?.letter || "";
+                    const displayPts = displayLetter ? getLetterPoint(displayLetter) : null;
+                    const bonus = KELIMELIK_BONUS_MAP[`${r},${c}`];
+                    const isSelected = klSelectedTilePos[0] === r && klSelectedTilePos[1] === c;
+
+                    return (
+                      <button
+                        key={`kl-${r}-${c}`}
+                        disabled={Boolean(klWinner) || klTurn !== "me" || Boolean(cell?.letter)}
+                        onClick={() => setKlSelectedTilePos([r, c])}
+                        className={`aspect-square rounded-lg border relative flex flex-col items-center justify-center transition ${
+                          draftObj
+                            ? "bg-amber-500/30 border-amber-400 text-amber-200"
+                            : cell?.letter
+                            ? "bg-indigo-600/30 border-indigo-400/60 text-white"
+                            : isSelected
+                            ? "bg-sky-900/70 border-sky-400 text-sky-100"
+                            : bonus === "K2"
+                            ? "bg-rose-950/60 border-rose-500/40 text-rose-300"
+                            : bonus === "H2"
+                            ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-300"
+                            : "bg-slate-950/80 border-slate-800 text-slate-400"
+                        }`}
+                      >
+                        {displayLetter ? (
+                          <>
+                            <span className="text-sm font-black leading-none">{displayLetter}</span>
+                            <span className="text-[9px] font-bold opacity-80 leading-none mt-0.5">
+                              {displayPts}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-[9px] font-bold">
+                            {bonus === "K2" ? "K2" : bonus === "H2" ? "H2" : bonus === "STAR" ? "★" : ""}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2.5">
+                <div className="grid grid-cols-7 gap-1.5">
+                  {klRack.map((ch, idx) => (
+                    <button
+                      key={`rack-${idx}-${ch || "empty"}`}
+                      disabled={!ch || Boolean(klWinner) || klTurn !== "me"}
+                      onClick={() => handleKlPlaceLetter(idx)}
+                      className={`aspect-square rounded-xl border flex flex-col items-center justify-center transition active:scale-95 ${
+                        ch
+                          ? "bg-amber-400 text-slate-950 border-amber-200 shadow"
+                          : "bg-slate-950/60 border-slate-800 text-transparent"
+                      }`}
+                    >
+                      {ch && (
+                        <>
+                          <span className="text-base font-black leading-none">{ch}</span>
+                          <span className="text-[10px] font-extrabold leading-none mt-0.5">
+                            {getLetterPoint(ch)}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-4 gap-1.5">
+                  <button
+                    onClick={handleKlUndoDraft}
+                    disabled={klDraftCells.length === 0}
+                    className="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-[11px] font-bold text-slate-200 flex items-center justify-center gap-1"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                    Geri Al
+                  </button>
+                  <button
+                    onClick={handleKlShuffleRack}
+                    className="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200 flex items-center justify-center gap-1"
+                  >
+                    <Shuffle className="w-3.5 h-3.5" />
+                    Karıştır
+                  </button>
+                  <button
+                    onClick={handleKlPassTurn}
+                    disabled={Boolean(klWinner) || klTurn !== "me"}
+                    className="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-[11px] font-bold text-amber-300 flex items-center justify-center gap-1"
+                  >
+                    <SkipForward className="w-3.5 h-3.5" />
+                    Pas
+                  </button>
+                  <button
+                    onClick={handleKlSubmitWord}
+                    disabled={Boolean(klWinner) || klTurn !== "me" || klDraftCells.length === 0}
+                    className="py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-[11px] font-extrabold text-white"
+                  >
+                    Gönder
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeMatch.gameType === "bluff" && bluffState && (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-indigo-300">
-                    Tur #{bluffState.round} • Masa Skoru
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-300">
+                    Tur {bluffState.round} • Blöf Masası
                   </span>
-                  <span className="text-[11px] text-slate-400">
-                    Seçen: {bluffStarterObj?.name || "-"}
+                  <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-semibold">
+                    {bluffPlayers.length} Oyuncu
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+
+                <div className="flex flex-wrap gap-1.5">
                   {bluffPlayers.map((p) => {
                     const isTurnNow =
                       (bluffState.phase === "selecting_word" && bluffState.starterId === p.id) ||
                       (bluffState.phase === "cluing" && activeBluffCluer?.id === p.id);
-                    const revealBluffer = bluffState.phase === "round_result" && bluffState.blufferId === p.id;
                     return (
                       <div
                         key={p.id}
-                        className={`p-2 rounded-xl border text-center space-y-0.5 ${
-                          revealBluffer
-                            ? "bg-rose-950/60 border-rose-500 text-rose-200"
-                            : isTurnNow
-                            ? "bg-indigo-950/60 border-indigo-400 text-white"
-                            : "bg-slate-950/80 border-slate-800 text-slate-200"
+                        className={`px-2.5 py-1 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${
+                          isTurnNow
+                            ? "bg-amber-500/20 border-amber-400/60 text-amber-200"
+                            : "bg-slate-950 border-slate-800 text-slate-300"
                         }`}
                       >
-                        <div className="text-xs font-bold truncate">
-                          {p.name} {p.id === myId ? "(Sen)" : ""}
-                        </div>
-                        <div className="text-sm font-extrabold text-amber-300">{p.score} Puan</div>
-                        <div className="text-[10px] text-slate-400">
-                          {revealBluffer
-                            ? "🎭 BLÖFÇÜ"
-                            : isTurnNow
-                            ? "Sıra onda"
-                            : p.isBot
-                            ? "Bot"
-                            : "Oyuncu"}
-                        </div>
+                        <span>{p.id === myId ? `${p.name} (Sen)` : p.name}</span>
+                        <span className="text-[11px] px-1.5 py-0.2 rounded bg-slate-800 text-emerald-300">
+                          {p.score}p
+                        </span>
                       </div>
                     );
                   })}
                 </div>
-              </div>
 
-              <div
-                className={`rounded-2xl p-4 border space-y-2 ${
-                  amIBluffer
-                    ? "bg-rose-950/45 border-rose-500/50"
-                    : "bg-emerald-950/35 border-emerald-500/40"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span
-                    className={`text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5 ${
-                      amIBluffer ? "text-rose-300" : "text-emerald-300"
-                    }`}
-                  >
-                    {amIBluffer ? (
-                      <>
-                        <EyeOff className="w-4 h-4" />
-                        SANA BLÖF KARTI GELDİ!
-                      </>
-                    ) : (
-                      <>
-                        <Eye className="w-4 h-4" />
-                        KELİME KARTI SENDE
-                      </>
-                    )}
-                  </span>
-                  <span className="text-[11px] text-slate-300">
-                    {amIBluffer ? "Kelimeyi göremezsin" : "Gizli kelimeyi biliyorsun"}
-                  </span>
-                </div>
-
-                {amIBluffer ? (
-                  <p className="text-xs text-rose-100/90 leading-relaxed">
-                    Gizli kelimeyi bilmiyorsun! Diğer oyuncuların yazdığı çağrışımlara bakarak kelimeyi tahmin etmeye çalış ve belli etmeden yakın bir çağrışım yaz.
-                  </p>
-                ) : bluffState.secretWord ? (
-                  <div className="bg-slate-950/80 border border-emerald-500/30 rounded-xl p-3 text-center">
-                    <div className="text-[11px] text-slate-400">Bu Turun Gizli Kelimesi</div>
-                    <div className="text-2xl font-black tracking-wide text-emerald-300 mt-0.5">
-                      {bluffState.secretWord}
+                {bluffState.secretWord ? (
+                  amIBluffer ? (
+                    <div className="p-2.5 rounded-xl bg-rose-950/50 border border-rose-500/40 text-xs text-rose-200 font-semibold">
+                      Gizli rolün: <strong className="text-white">BLÖFÇÜ</strong> — Kelimeyi bilmiyorsun, çaktırmadan uyumlu bir çağrışım uydur!
                     </div>
-                  </div>
+                  ) : (
+                    <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between">
+                      <span className="text-xs text-emerald-200 font-medium">Gizli Kelimen:</span>
+                      <span className="text-base font-extrabold text-white tracking-wide">
+                        {bluffState.secretWord}
+                      </span>
+                    </div>
+                  )
                 ) : (
-                  <p className="text-xs text-emerald-100/90">
+                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300">
                     {amIBluffStarter
-                      ? "Aşağıdaki 10 kelimeden birini seç; kelime kartı olan diğer oyuncular da seçtiğin kelimeyi görecek."
-                      : `${bluffStarterObj?.name || "Başlayan oyuncu"} 10 kelimeden birini seçiyor...`}
-                  </p>
+                      ? "Bu turun ilk oyuncusu sensin! Aşağıdaki 10 kelimeden birini gizli kelime olarak seç."
+                      : `${bluffStarterObj?.name || "İlk oyuncu"} bu turun gizli kelimesini seçiyor...`}
+                  </div>
                 )}
               </div>
 
-              {bluffState.phase === "selecting_word" && (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                  <div className="text-xs font-bold text-white">
-                    {amIBluffStarter
-                      ? "10 Kelimelik Kartından Bir Kelime Seç:"
-                      : `${bluffStarterObj?.name || "Oyuncu"} kelime seçiyor...`}
+              {bluffState.phase === "selecting_word" && amIBluffStarter && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+                  <div className="text-xs font-bold text-indigo-300">
+                    10 Kelimeden Birini Seç (Sadece kelimeyi bilenler görecek)
                   </div>
-                  {!amIBluffer && (
-                    <div className="grid grid-cols-2 gap-2">
-                      {(bluffState.wordOptions || []).map((w, idx) => (
-                        <button
-                          key={w}
-                          disabled={!amIBluffStarter}
-                          onClick={() => handleBluffSelectSecretWord(w)}
-                          className={`p-2.5 rounded-xl border text-left text-xs font-bold transition ${
-                            amIBluffStarter
-                              ? "bg-slate-950 hover:bg-indigo-600/25 border-slate-700 hover:border-indigo-400 text-white active:scale-95"
-                              : "bg-slate-950/60 border-slate-800 text-slate-300 cursor-default"
-                          }`}
-                        >
-                          <span className="text-indigo-400 mr-1.5">{idx + 1}.</span>
-                          {w}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    {(bluffState.wordOptions || []).map((w) => (
+                      <button
+                        key={w}
+                        onClick={() => handleBluffSelectSecretWord(w)}
+                        className="py-2.5 px-3 rounded-xl bg-slate-950 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-400 text-xs font-bold text-white transition text-center"
+                      >
+                        {w}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
-              {bluffState.phase !== "selecting_word" && (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white">
-                      Yazılan Çağrışımlar ({bluffClues.length} / min {bluffPlayers.length * 2})
-                    </span>
-                    <span className="text-[11px] text-slate-400">
-                      Tur {Math.floor(bluffClues.length / Math.max(1, bluffPlayers.length)) + 1}
-                    </span>
-                  </div>
-
-                  {bluffClues.length === 0 ? (
-                    <p className="text-xs text-slate-400 text-center py-3">
-                      İlk çağrışımı {activeBluffCluer?.name || "başlayan oyuncu"} yazacak...
-                    </p>
-                  ) : (
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                      {bluffClues.map((c, i) => (
-                        <div
-                          key={`${c.playerId}-${i}`}
-                          className="px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between text-xs"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-bold">
-                              #{c.cycle || 1}
-                            </span>
-                            <span className="font-semibold text-indigo-300">{c.playerName}:</span>
-                          </div>
-                          <span className="font-extrabold text-white">{c.text}</span>
+              {bluffClues.length > 0 && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2">
+                  <div className="text-xs font-bold text-slate-300">Söylenen Çağrışımlar</div>
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                    {bluffClues.map((c, idx) => (
+                      <div
+                        key={`${c.playerId}_${idx}_${c.ts}`}
+                        className="flex items-center justify-between bg-slate-950/90 border border-slate-800/80 rounded-xl px-3 py-2 text-xs"
+                      >
+                        <div>
+                          <span className="font-bold text-indigo-300">
+                            {c.playerId === myId ? `${c.playerName} (Sen)` : c.playerName}:
+                          </span>{" "}
+                          <span className="text-white font-semibold">{c.text}</span>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        <span className="text-[10px] text-slate-500">{c.cycle || 1}. tur</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-                  {bluffState.phase === "cluing" && (
-                    <div className="pt-1">
-                      {isMyBluffClueTurn ? (
-                        <form onSubmit={handleBluffSubmitClue} className="flex gap-2">
-                          <input
-                            type="text"
-                            maxLength={24}
-                            value={bluffClueInput}
-                            onChange={(e) => setBluffClueInput(e.target.value)}
-                            placeholder={
-                              amIBluffer
-                                ? "Belli etmeden yakın bir çağrışım yaz..."
-                                : `"${bluffState.secretWord}" kelimesine yakın çağrışım yaz...`
-                            }
-                            className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-indigo-500/60 text-xs text-white focus:outline-none"
-                          />
-                          <button
-                            type="submit"
-                            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
-                          >
-                            Gönder
-                          </button>
-                        </form>
-                      ) : (
-                        <p className="text-xs text-center text-amber-300 font-medium">
-                          Sıra {activeBluffCluer?.name || "oyuncuda"} — çağrışım yazması bekleniyor...
-                        </p>
-                      )}
-                    </div>
+              {bluffState.phase === "cluing" && bluffState.secretWord && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+                  {isMyBluffClueTurn ? (
+                    <form onSubmit={handleBluffSubmitClue} className="space-y-2">
+                      <label className="block text-xs font-bold text-amber-300">
+                        Sıra Sende! Tek kelimelik / kısa bir çağrışım yaz:
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          maxLength={28}
+                          value={bluffClueInput}
+                          onChange={(e) => setBluffClueInput(e.target.value)}
+                          placeholder={amIBluffer ? "Blöf çağrışımın..." : "Kelimeyle ilgili çağrışım..."}
+                          className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white focus:outline-none focus:border-indigo-500"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!bluffClueInput.trim()}
+                          className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs font-bold text-white"
+                        >
+                          Gönder
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <p className="text-xs text-slate-400 text-center py-1">
+                      Şu an <strong className="text-slate-200">{activeBluffCluer?.name}</strong> çağrışım söylüyor...
+                    </p>
                   )}
                 </div>
               )}
 
               {bluffState.phase === "ask_vote" && (
-                <div className="bg-amber-950/55 border border-amber-500/50 rounded-2xl p-4 space-y-3 text-center">
-                  <HelpCircle className="w-7 h-7 text-amber-300 mx-auto" />
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 text-center">
                   <div className="text-sm font-extrabold text-white">
-                    Blöfçüyü tahmin etmek istiyor musunuz?
+                    Oylamaya geçilsin mi?
                   </div>
-                  <p className="text-xs text-amber-100/90">
-                    Herkes en az 2 çağrışımını yaptı. Çoğunluk <strong>Evet</strong> derse tahmin ekranı açılacak; <strong>Hayır</strong> derse yeni çağrışım turu devam edecek.
+                  <p className="text-xs text-slate-400">
+                    Herkes en az 2 çağrışım turunu tamamladı. Çoğunluk &ldquo;Evet&rdquo; derse Blöfçü oylaması başlar, &ldquo;Hayır&rdquo; derse yeni çağrışım turu açılır.
                   </p>
-
-                  {myPromptVote ? (
-                    <div className="text-xs font-bold text-emerald-300">
-                      Oyun kaydedildi ({myPromptVote === "yes" ? "Evet" : "Hayır"}). Diğer oyuncular bekleniyor...
-                    </div>
-                  ) : (
+                  {!myPromptVote ? (
                     <div className="grid grid-cols-2 gap-2.5">
                       <button
                         onClick={() => handleBluffVotePromptAnswer("yes")}
-                        className="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white"
+                        className="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white"
                       >
-                        Evet, Tahmin Edelim
+                        Evet, Oylayalım
                       </button>
                       <button
                         onClick={() => handleBluffVotePromptAnswer("no")}
-                        className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-xs text-slate-200"
+                        className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200"
                       >
-                        Hayır, Çağrışım Devam Etsin
+                        Hayır, Devam
                       </button>
+                    </div>
+                  ) : (
+                    <div className="text-xs font-semibold text-indigo-300">
+                      Senin oyun: <strong>{myPromptVote === "yes" ? "Evet" : "Hayır"}</strong>. Diğer oyuncular bekleniyor...
                     </div>
                   )}
                 </div>
               )}
 
               {bluffState.phase === "voting" && (
-                <div className="bg-slate-900 border border-indigo-500/40 rounded-2xl p-4 space-y-3">
-                  <div className="text-sm font-extrabold text-white text-center">
-                    Blöf Kartı Kimde? Tahmin Et!
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                  <div className="text-sm font-extrabold text-white">
+                    Blöfçü Kim? (Tahmin Oylaması)
                   </div>
+                  <p className="text-xs text-slate-400">
+                    Doğru bilirsen <strong className="text-emerald-300">+1 puan</strong> alırsın. Bilemezsen <strong className="text-rose-300">-1 puanın</strong> (varsa) Blöfçüye geçer!
+                  </p>
 
                   {amIBluffer ? (
-                    <p className="text-xs text-center text-rose-200 py-2">
-                      Blöf kartı sende! Kelime kartı olan oyuncular seni bulmaya çalışıyor...
-                    </p>
+                    <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-amber-300 font-semibold text-center">
+                      Sen Blöfçüsün! Diğer oyuncuların seni tahmin etmesi bekleniyor...
+                    </div>
                   ) : myBluffGuess ? (
-                    <p className="text-xs text-center text-emerald-300 font-semibold py-2">
-                      Tahminin alındı! Diğer oyuncuların tahmini bekleniyor...
-                    </p>
+                    <div className="p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/40 text-xs text-indigo-200 font-semibold text-center">
+                      Tahminin alındı! Diğer oyuncuların oylaması bekleniyor...
+                    </div>
                   ) : (
-                    <>
-                      <div className="space-y-2">
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
                         {bluffPlayers
                           .filter((p) => p.id !== myId)
-                          .map((candidate) => {
-                            const selected = bluffSelectedSuspect === candidate.id;
+                          .map((cand) => {
+                            const selected = bluffSelectedSuspect === cand.id;
                             return (
                               <button
-                                key={candidate.id}
-                                onClick={() => setBluffSelectedSuspect(candidate.id)}
-                                className={`w-full p-3 rounded-xl border text-left flex items-center justify-between text-xs font-bold transition ${
+                                key={cand.id}
+                                onClick={() => setBluffSelectedSuspect(cand.id)}
+                                className={`py-2.5 px-3 rounded-xl border text-xs font-bold transition ${
                                   selected
-                                    ? "bg-rose-600/25 border-rose-400 text-white"
-                                    : "bg-slate-950/80 border-slate-800 text-slate-200"
+                                    ? "bg-rose-600/30 border-rose-400 text-white"
+                                    : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600"
                                 }`}
                               >
-                                <span>{candidate.name}</span>
-                                {selected && <Check className="w-4 h-4 text-rose-400" />}
+                                {cand.name}
                               </button>
                             );
                           })}
                       </div>
-
                       <button
                         disabled={!bluffSelectedSuspect}
                         onClick={handleBluffSubmitGuess}
-                        className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-45 font-bold text-xs text-white"
+                        className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-xs font-extrabold text-white"
                       >
-                        Tahmini Onayla
+                        Tahmini Gönder
                       </button>
-                    </>
+                    </div>
                   )}
                 </div>
               )}
 
               {bluffState.phase === "round_result" && bluffState.roundSummary && (
-                <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl p-4 space-y-3">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
                   <div className="text-center space-y-1">
-                    <Trophy className="w-8 h-8 text-amber-400 mx-auto" />
-                    <div className="text-base font-extrabold text-white">
-                      Tur #{bluffState.round} Sonucu
+                    <div className="text-xs uppercase tracking-wider font-bold text-amber-300">
+                      {bluffState.round}. Tur Sonucu
                     </div>
-                    <p className="text-xs text-slate-300">
-                      Gizli Kelime: <strong className="text-emerald-300">{bluffState.roundSummary.secretWord}</strong> • Blöfçü:{" "}
-                      <strong className="text-rose-300">{bluffState.roundSummary.blufferName}</strong>
-                    </p>
+                    <div className="text-base font-extrabold text-white">
+                      Blöfçü: <span className="text-rose-400">{bluffState.roundSummary.blufferName}</span>
+                    </div>
+                    <div className="text-xs text-slate-300">
+                      Gizli Kelime: <strong className="text-emerald-300">{bluffState.roundSummary.secretWord}</strong>
+                    </div>
                   </div>
 
-                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-1.5 text-xs">
+                  <div className="space-y-1.5">
                     {(bluffState.roundSummary.details || []).map((line, i) => (
-                      <div key={i} className="text-slate-200">
-                        • {line}
+                      <div
+                        key={i}
+                        className="text-xs bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200"
+                      >
+                        {line}
                       </div>
                     ))}
-                    <div className="pt-1 border-t border-slate-800 font-bold text-amber-300">
-                      Blöfçü ({bluffState.roundSummary.blufferName}) toplam +
-                      {bluffState.roundSummary.transferredToBluffer || 0} puan kazandı!
-                    </div>
                   </div>
 
                   <button
                     onClick={handleBluffNextRound}
-                    className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-xs text-white flex items-center justify-center gap-1.5"
+                    className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-extrabold text-white"
                   >
-                    <RotateCcw className="w-4 h-4" />
-                    Oyun Tekrar Başlat (Sonraki Tur)
+                    Sonraki Tura Geç
                   </button>
                 </div>
               )}
@@ -3501,74 +4304,91 @@ export default function App() {
 
           {activeMatch.gameType === "battleship" && (
             <div className="space-y-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 text-center space-y-1">
-                <p className="text-sm font-semibold text-indigo-300">{bsStatus}</p>
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 text-center space-y-1.5">
+                <p className="text-sm font-semibold text-amber-300">{bsStatus}</p>
                 <p className="text-[11px] text-slate-400">
-                  Düşman Hedef İsabeti: {myHitCells}/{totalShipCells}
+                  Düşman İsabet: {myHitCells}/{totalShipCells || 7}
                 </p>
                 {bsWinner && (
-                  <div className="pt-2 space-y-2">
-                    <p className="text-base font-extrabold text-emerald-400">
-                      {bsWinner === "me" ? "KAZANDIN! (+1 Puan) 🎉" : "RAKİP KAZANDI!"}
-                    </p>
+                  <div className="pt-2 flex flex-col items-center gap-2">
+                    <span
+                      className={`text-sm font-extrabold ${
+                        bsWinner === "me" ? "text-emerald-400" : "text-rose-400"
+                      }`}
+                    >
+                      {bsWinner === "me" ? "KAZANDIN! (+1 Puan)" : "KAYBETTİN!"}
+                    </span>
                     <button
                       onClick={() => handleRequestNewMatch("battleship")}
                       className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
                     >
-                      {activeMatch.isBot ? "Yeni Amiral Battı Maçı" : "Yeni Maç Daveti Gönder"}
+                      {activeMatch.isBot ? "Yeni Maç Başlat" : "Yeni Maç Daveti Gönder"}
                     </button>
                   </div>
                 )}
               </div>
 
-              <div>
-                <div className="text-xs font-semibold text-slate-400 mb-1.5 flex justify-between">
-                  <span>DÜŞMAN DENİZİ</span>
-                  <span>{bsTurn === "me" ? "Sıra Sende" : "Rakibin Sırası"}</span>
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-rose-300">Düşman Denizi (Saldır)</span>
+                  <span className="text-slate-400">
+                    {bsTurn === "me" && !bsWinner ? "Atış sırası sende" : "Bekleniyor"}
+                  </span>
                 </div>
-                <div className="grid grid-cols-6 gap-1.5 bg-slate-900 p-2.5 rounded-2xl border border-slate-800">
+                <div className="grid grid-cols-6 gap-1.5">
                   {myShotsOnEnemy.map((row, r) =>
-                    row.map((cell, c) => (
-                      <button
-                        key={`atk-${r}-${c}`}
-                        disabled={Boolean(bsWinner) || bsTurn !== "me" || cell !== 0}
-                        onClick={() => handleBattleshipAttack(r, c)}
-                        className={`aspect-square rounded-lg font-bold text-sm flex items-center justify-center transition ${
-                          cell === 2
-                            ? "bg-rose-600 text-white"
-                            : cell === 1
-                            ? "bg-slate-700 text-slate-400"
-                            : "bg-sky-950/80 hover:bg-sky-900 disabled:opacity-60 border border-sky-800/50 text-sky-200"
-                        }`}
-                      >
-                        {cell === 2 ? "💥" : cell === 1 ? "•" : ""}
-                      </button>
-                    ))
+                    row.map((cell, c) => {
+                      let content = "";
+                      let cls = "bg-slate-950 hover:bg-slate-800 border-slate-800 text-slate-400";
+                      if (cell === 2) {
+                        content = "💥";
+                        cls = "bg-rose-950/90 border-rose-500/60 text-rose-200";
+                      } else if (cell === 1) {
+                        content = "•";
+                        cls = "bg-slate-800/80 border-slate-700 text-slate-400";
+                      }
+                      return (
+                        <button
+                          key={`en-${r}-${c}`}
+                          disabled={bsTurn !== "me" || Boolean(bsWinner) || cell !== 0}
+                          onClick={() => handleBattleshipAttack(r, c)}
+                          className={`aspect-square rounded-xl border font-bold text-sm flex items-center justify-center transition active:scale-95 ${cls}`}
+                        >
+                          {content}
+                        </button>
+                      );
+                    })
                   )}
                 </div>
               </div>
 
-              <div>
-                <div className="text-xs font-semibold text-slate-400 mb-1.5">SENİN FİLON</div>
-                <div className="grid grid-cols-6 gap-1 bg-slate-900/70 p-2 rounded-2xl border border-slate-800/80">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-cyan-300">Senin Filo Haritan</span>
+                  <span className="text-slate-400">Gemilerin</span>
+                </div>
+                <div className="grid grid-cols-6 gap-1">
                   {myShipGrid.map((row, r) =>
-                    row.map((cell, c) => {
-                      const hitByOpp = enemyShotsOnMe[r][c] === 2;
-                      const missByOpp = enemyShotsOnMe[r][c] === 1;
+                    row.map((val, c) => {
+                      const shotVal = enemyShotsOnMe[r][c];
+                      let cls = "bg-slate-950 border-slate-800/80";
+                      let mark = "";
+                      if (val === 1 && shotVal === 2) {
+                        cls = "bg-rose-950 border-rose-500";
+                        mark = "🔥";
+                      } else if (val === 1) {
+                        cls = "bg-cyan-500/25 border-cyan-400/50";
+                        mark = "🚢";
+                      } else if (shotVal === 1) {
+                        cls = "bg-slate-800/60 border-slate-700";
+                        mark = "•";
+                      }
                       return (
                         <div
-                          key={`def-${r}-${c}`}
-                          className={`aspect-square rounded-md text-xs flex items-center justify-center ${
-                            hitByOpp
-                              ? "bg-rose-600/80 text-white"
-                              : cell === 1
-                              ? "bg-indigo-600/70 text-white"
-                              : missByOpp
-                              ? "bg-slate-800 text-slate-500"
-                              : "bg-slate-950/70"
-                          }`}
+                          key={`my-${r}-${c}`}
+                          className={`aspect-square rounded-lg border text-xs flex items-center justify-center ${cls}`}
                         >
-                          {hitByOpp ? "🔥" : cell === 1 ? "🚢" : missByOpp ? "•" : ""}
+                          {mark}
                         </div>
                       );
                     })
@@ -3579,304 +4399,240 @@ export default function App() {
           )}
 
           {activeMatch.gameType === "rps" && (
-            <div className="space-y-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between text-center">
-                  <div className="flex-1">
-                    <div className="text-xs text-slate-400">Sen</div>
-                    <div className="text-3xl font-extrabold text-indigo-400">{rpsMyScore}</div>
-                  </div>
-                  <div className="px-3 py-1 rounded-full bg-slate-800 text-xs font-bold text-slate-300">
-                    TUR {Math.min(rpsRound, RPS_TOTAL_ROUNDS)}/{RPS_TOTAL_ROUNDS}
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-xs text-slate-400">{activeMatch.opponent.name}</div>
-                    <div className="text-3xl font-extrabold text-rose-400">{rpsOppScore}</div>
-                  </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4 text-center">
+              <div className="flex items-center justify-around bg-slate-950/80 border border-slate-800 rounded-2xl py-3 px-2">
+                <div>
+                  <div className="text-[11px] text-slate-400">Sen</div>
+                  <div className="text-2xl font-extrabold text-indigo-400">{rpsMyScore}</div>
                 </div>
-
-                <div className="grid grid-cols-5 gap-1.5 pt-1">
-                  {Array.from({ length: RPS_TOTAL_ROUNDS }).map((_, idx) => {
-                    const rNum = idx + 1;
-                    const item = rpsHistory.find((h) => h.round === rNum);
-                    const myOutcome = item
-                      ? activeMatch.isHost
-                        ? item.resultForP1
-                        : item.resultForP1 === "win"
-                        ? "lose"
-                        : item.resultForP1 === "lose"
-                        ? "win"
-                        : "draw"
-                      : null;
-
-                    const badgeStyle =
-                      myOutcome === "win"
-                        ? "bg-emerald-600/25 border-emerald-500/60 text-emerald-300"
-                        : myOutcome === "lose"
-                        ? "bg-rose-600/25 border-rose-500/60 text-rose-300"
-                        : myOutcome === "draw"
-                        ? "bg-amber-500/20 border-amber-400/50 text-amber-200"
-                        : rNum === rpsRound && !rpsMatchWinner
-                        ? "bg-indigo-600/20 border-indigo-400/60 text-indigo-200"
-                        : "bg-slate-950/70 border-slate-800 text-slate-500";
-                    return (
-                      <div
-                        key={rNum}
-                        className={`rounded-xl border py-1.5 px-1 text-center flex flex-col items-center justify-center ${badgeStyle}`}
-                      >
-                        <span className="text-[10px] font-bold">T{rNum}</span>
-                        <span className="text-[10px] leading-tight mt-0.5">
-                          {item ? item.label : rNum === rpsRound && !rpsMatchWinner ? "•" : "-"}
-                        </span>
-                      </div>
-                    );
-                  })}
+                <div className="text-xs font-bold px-3 py-1 rounded-full bg-slate-800 text-slate-300">
+                  TUR {rpsRound}/{RPS_TOTAL_ROUNDS}
                 </div>
-
-                <p className="text-center text-sm font-medium text-slate-200">{rpsRoundText}</p>
+                <div>
+                  <div className="text-[11px] text-slate-400">{activeMatch.opponent.name}</div>
+                  <div className="text-2xl font-extrabold text-rose-400">{rpsOppScore}</div>
+                </div>
               </div>
 
-              {(shownMyPick || shownOppPick) && (
-                <div className="grid grid-cols-2 gap-3 text-center">
-                  <div className="bg-slate-900/90 border border-indigo-500/30 rounded-2xl p-4">
-                    <div className="text-xs text-slate-400 mb-1">
-                      Seçimin ({shownMyPick ? getRPSLabel(shownMyPick) : "Bekleniyor"})
-                    </div>
-                    <div className="text-4xl">{shownMyPick ? getRPSEmoji(shownMyPick) : "⏳"}</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3 space-y-1">
+                  <div className="text-[11px] text-slate-400">Senin Seçimin</div>
+                  <div className="text-3xl h-10 flex items-center justify-center">
+                    {rpsPhase === "picking" && !rpsMyPick ? "🤔" : getRPSEmoji(shownMyPick)}
                   </div>
-                  <div className="bg-slate-900/90 border border-rose-500/30 rounded-2xl p-4">
-                    <div className="text-xs text-slate-400 mb-1">
-                      Rakip (
-                      {rpsPhase === "revealing" || rpsPhase === "finished" || activeMatch.isBot
-                        ? shownOppPick
-                          ? getRPSLabel(shownOppPick)
-                          : "-"
-                        : rpsOppPick
-                        ? "Seçti"
-                        : "Düşünüyor"}
-                      )
-                    </div>
-                    <div className="text-4xl">
-                      {rpsPhase === "revealing" || rpsPhase === "finished" || activeMatch.isBot
-                        ? shownOppPick
-                          ? getRPSEmoji(shownOppPick)
-                          : "⏳"
-                        : rpsOppPick
-                        ? "✅"
-                        : "⏳"}
-                    </div>
+                  <div className="text-xs font-semibold text-slate-200">
+                    {rpsPhase === "picking" && !rpsMyPick ? "Seçim bekleniyor" : getRPSLabel(shownMyPick)}
                   </div>
+                </div>
+
+                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3 space-y-1">
+                  <div className="text-[11px] text-slate-400">{activeMatch.opponent.name}</div>
+                  <div className="text-3xl h-10 flex items-center justify-center">
+                    {rpsPhase === "picking" ? "❓" : getRPSEmoji(shownOppPick)}
+                  </div>
+                  <div className="text-xs font-semibold text-slate-200">
+                    {rpsPhase === "picking"
+                      ? rpsMyPick
+                        ? "Seçimini yaptı / bekleniyor"
+                        : "Kapalı"
+                      : getRPSLabel(shownOppPick)}
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-sm font-bold text-amber-300 min-h-[2.5rem] flex items-center justify-center">
+                {rpsRoundText}
+              </p>
+
+              {rpsHistory.length > 0 && (
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  {rpsHistory.map((h) => (
+                    <span
+                      key={h.round}
+                      className={`text-[11px] px-2.5 py-1 rounded-full border font-semibold ${
+                        h.resultForP1 === "win"
+                          ? "bg-emerald-950/70 border-emerald-500/40 text-emerald-300"
+                          : h.resultForP1 === "lose"
+                          ? "bg-rose-950/70 border-rose-500/40 text-rose-300"
+                          : "bg-slate-800 border-slate-700 text-slate-300"
+                      }`}
+                    >
+                      T{h.round}: {h.label}
+                    </span>
+                  ))}
                 </div>
               )}
 
-              {rpsMatchWinner ? (
-                <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-2xl p-5 text-center space-y-3">
-                  <Trophy className="w-10 h-10 text-amber-400 mx-auto" />
-                  <div className="text-xl font-extrabold text-white">
-                    {rpsMatchWinner === "me"
-                      ? `5 Turu Kazandın! (+1 Puan) (${rpsMyScore}-${rpsOppScore})`
-                      : rpsMatchWinner === "opp"
-                      ? `${activeMatch.opponent.name} Kazandı! (${rpsMyScore}-${rpsOppScore})`
-                      : `5 Tur Berabere Bitti! (${rpsMyScore}-${rpsOppScore})`}
-                  </div>
-                  <button
-                    onClick={() => handleRequestNewMatch("rps")}
-                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-sm text-white"
-                  >
-                    {activeMatch.isBot ? "Yeni 5 Turluk Maç" : "Yeni 5 Turluk Maç (Davet Gönder)"}
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-3">
-                  {RPS_CHOICES.map((item) => {
-                    const isPicked = rpsMyPick === item.id;
+              {!rpsMatchWinner ? (
+                <div className="grid grid-cols-3 gap-2.5 pt-1">
+                  {RPS_CHOICES.map((ch) => {
+                    const isSelectedThisRound = rpsMyPick === ch.id;
                     return (
                       <button
-                        key={item.id}
+                        key={ch.id}
                         disabled={rpsPhase !== "picking" || Boolean(rpsMyPick)}
-                        onClick={() => handleRPSPick(item.id)}
-                        className={`py-5 rounded-2xl border flex flex-col items-center gap-2 transition active:scale-95 ${
-                          isPicked
-                            ? "bg-indigo-600/30 border-indigo-400 ring-2 ring-indigo-500/40"
-                            : "bg-slate-900 hover:bg-indigo-600/20 border-slate-800 hover:border-indigo-500/50 disabled:opacity-50"
+                        onClick={() => handleRPSPick(ch.id)}
+                        className={`py-3.5 rounded-2xl border disabled:opacity-50 active:scale-95 transition flex flex-col items-center gap-1 ${
+                          isSelectedThisRound
+                            ? "bg-indigo-600/30 border-indigo-400 ring-2 ring-indigo-400/40"
+                            : "bg-slate-800 hover:bg-slate-700 border-slate-700"
                         }`}
                       >
-                        <span className="text-3xl">{item.emoji}</span>
-                        <span className="text-xs font-bold text-slate-200">{item.label}</span>
+                        <span className="text-2xl">{ch.emoji}</span>
+                        <span className="text-xs font-bold">{ch.label}</span>
                       </button>
                     );
                   })}
+                </div>
+              ) : (
+                <div className="space-y-2.5 pt-1">
+                  <div
+                    className={`text-base font-extrabold ${
+                      rpsMatchWinner === "me"
+                        ? "text-emerald-400"
+                        : rpsMatchWinner === "draw"
+                        ? "text-amber-300"
+                        : "text-rose-400"
+                    }`}
+                  >
+                    {rpsMatchWinner === "me"
+                      ? `SERİYİ KAZANDIN! (${rpsMyScore}-${rpsOppScore}) (+1 Puan)`
+                      : rpsMatchWinner === "draw"
+                      ? `SERİ BERABERE! (${rpsMyScore}-${rpsOppScore})`
+                      : `SERİYİ KAYBETTİN! (${rpsMyScore}-${rpsOppScore})`}
+                  </div>
+                  <button
+                    onClick={() => handleRequestNewMatch("rps")}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                  >
+                    {activeMatch.isBot ? "Yeni 5 Turluk Seri" : "Yeni Seri Daveti Gönder"}
+                  </button>
                 </div>
               )}
             </div>
           )}
 
           {activeMatch.gameType === "ttt" && (
-            <div className="space-y-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 text-center space-y-2">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4 text-center">
+              <div className="text-sm font-semibold text-slate-300">
                 {tttResult ? (
-                  <>
-                    <p className="text-base font-extrabold text-emerald-400">
-                      {tttResult.winner === "draw"
-                        ? "Berabere!"
-                        : tttResult.winner === (activeMatch.isBot || activeMatch.isHost ? "X" : "O")
-                        ? "Kazandın! (+1 Puan)"
-                        : "Rakip Kazandı!"}
-                    </p>
-                    <button
-                      onClick={() => handleRequestNewMatch("ttt")}
-                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
-                    >
-                      {activeMatch.isBot ? "Yeni Tic Tac Toe Maçı" : "Yeni Maç Daveti Gönder"}
-                    </button>
-                  </>
+                  <span className="text-emerald-400 font-extrabold">
+                    {tttResult.winner === "draw"
+                      ? "Berabere!"
+                      : tttResult.winner === (activeMatch.isBot || activeMatch.isHost ? "X" : "O")
+                      ? "Kazandın! (+1 Puan)"
+                      : "Rakip Kazandı!"}
+                  </span>
                 ) : (
-                  <p className="text-sm font-semibold text-slate-200">
-                    Sıra: <span className="text-indigo-400 font-bold">{tttTurn}</span>{" "}
-                    <span className="text-xs text-slate-400">
-                      (Senin taşın: {activeMatch.isBot || activeMatch.isHost ? "X" : "O"})
-                    </span>
-                  </p>
+                  <span>
+                    Sıra:{" "}
+                    <strong className="text-indigo-400">
+                      {tttTurn === (activeMatch.isBot || activeMatch.isHost ? "X" : "O")
+                        ? "Sende"
+                        : activeMatch.opponent.name}
+                    </strong>{" "}
+                    ({tttTurn})
+                  </span>
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-2.5 aspect-square max-w-[320px] mx-auto">
-                {tttBoard.map((cell, idx) => {
-                  const isWinCell = tttResult?.line?.includes(idx);
+              <div className="grid grid-cols-3 gap-2 max-w-[270px] mx-auto">
+                {tttBoard.map((val, idx) => {
+                  const winCell = tttResult?.line?.includes(idx);
                   return (
                     <button
                       key={idx}
-                      disabled={Boolean(tttResult) || Boolean(cell)}
+                      disabled={Boolean(val) || Boolean(tttResult)}
                       onClick={() => handleTTTMove(idx)}
-                      className={`rounded-2xl text-4xl font-black flex items-center justify-center border transition ${
-                        isWinCell
+                      className={`aspect-square rounded-2xl border text-3xl font-black flex items-center justify-center transition active:scale-95 ${
+                        winCell
                           ? "bg-emerald-600/30 border-emerald-400 text-emerald-300"
-                          : "bg-slate-900 hover:bg-slate-800 border-slate-800 text-white"
+                          : "bg-slate-950 hover:bg-slate-800/80 border-slate-800 text-white"
                       }`}
                     >
-                      {cell === "X" ? (
-                        <span className="text-indigo-400">X</span>
-                      ) : cell === "O" ? (
-                        <span className="text-rose-400">O</span>
-                      ) : (
-                        ""
-                      )}
+                      {val}
                     </button>
                   );
                 })}
               </div>
+
+              {tttResult && (
+                <button
+                  onClick={() => handleRequestNewMatch("ttt")}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                >
+                  {activeMatch.isBot ? "Tekrar Oyna" : "Yeni Maç Daveti Gönder"}
+                </button>
+              )}
             </div>
           )}
 
           {activeMatch.gameType === "wordle" && (
-            <div className="space-y-3">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2">
-                <p className="text-xs font-medium text-slate-200 text-center">{wordStatus}</p>
-
-                <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] pt-0.5">
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-600/25 border border-emerald-500/50 text-emerald-300 font-semibold">
-                    Yeşil: Doğru yer
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-amber-500/25 border border-amber-400/60 text-amber-300 font-semibold">
-                    Turuncu: Farklı yer
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-rose-600/25 border border-rose-500/50 text-rose-300 font-semibold">
-                    Kırmızı: Yok
-                  </span>
-                </div>
-
-                {(wordLetterClues.green.length > 0 ||
-                  wordLetterClues.orange.length > 0 ||
-                  wordLetterClues.red.length > 0) && (
-                  <div className="bg-slate-950/75 border border-slate-800 rounded-xl p-2 text-[11px] space-y-1">
-                    {wordLetterClues.green.length > 0 && (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-emerald-400 font-bold">Doğru Yer:</span>
-                        {wordLetterClues.green.map((ch) => (
-                          <span key={`g-${ch}`} className="px-1.5 py-0.5 rounded bg-emerald-600 text-white font-extrabold">
-                            {ch}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {wordLetterClues.orange.length > 0 && (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-amber-400 font-bold">Yerini Değiştir:</span>
-                        {wordLetterClues.orange.map((ch) => (
-                          <span key={`o-${ch}`} className="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 font-extrabold">
-                            {ch}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {wordLetterClues.red.length > 0 && (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-rose-400 font-bold">Kelimede Yok:</span>
-                        {wordLetterClues.red.map((ch) => (
-                          <span key={`r-${ch}`} className="px-1.5 py-0.5 rounded bg-rose-700/80 text-rose-100 font-bold">
-                            {ch}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {activeMatch.isBot && (
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px] text-slate-400">
-                      <span>{activeMatch.opponent.name} İlerlemesi</span>
-                      <span>%{oppWordProgress}</span>
-                    </div>
-                    <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-amber-400 transition-all" style={{ width: `${oppWordProgress}%` }} />
-                    </div>
-                  </div>
-                )}
-
-                {wordFinished && (
-                  <div className="pt-1 text-center">
-                    <button
-                      onClick={() => handleRequestNewMatch("wordle")}
-                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
-                    >
-                      {activeMatch.isBot ? "Yeni Kelime Turu" : "Yeni Maç Daveti Gönder"}
-                    </button>
-                  </div>
-                )}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-3">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>Tahmin: {wordGuesses.length}/6</span>
+                {activeMatch.isBot && <span>Rakip İlerleme: %{oppWordProgress}</span>}
               </div>
 
-              <div className="space-y-1.5 max-w-[290px] mx-auto">
+              <p className="text-xs text-center text-amber-300 font-medium">{wordStatus}</p>
+
+              <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 space-y-1.5 text-[11px]">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="px-2 py-0.5 rounded bg-emerald-600 text-white font-bold">
+                    Doğru Yer
+                  </span>
+                  <span className="text-slate-200 font-semibold">
+                    {wordLetterClues.green.length > 0 ? wordLetterClues.green.join(", ") : "-"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-bold">
+                    Farklı Yer
+                  </span>
+                  <span className="text-slate-200 font-semibold">
+                    {wordLetterClues.orange.length > 0 ? wordLetterClues.orange.join(", ") : "-"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="px-2 py-0.5 rounded bg-rose-700 text-white font-bold">
+                    Kelimede Yok
+                  </span>
+                  <span className="text-slate-300 font-medium">
+                    {wordLetterClues.red.length > 0 ? wordLetterClues.red.join(", ") : "-"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 max-w-[260px] mx-auto">
                 {Array.from({ length: 6 }).map((_, rowIdx) => {
                   const guessObj = wordGuesses[rowIdx];
-                  const isCurrentRow = rowIdx === wordGuesses.length && !wordFinished;
-                  const currentChars = Array.from(currentGuess);
+                  const isCurrent = rowIdx === wordGuesses.length && !wordFinished;
+                  const activeChars = isCurrent ? Array.from(currentGuess) : [];
+                  const guessChars = guessObj ? Array.from(guessObj.word) : [];
+
                   return (
                     <div key={rowIdx} className="grid grid-cols-5 gap-1.5">
                       {Array.from({ length: 5 }).map((__, colIdx) => {
-                        const guessChars = guessObj ? Array.from(guessObj.word) : [];
-                        const letter = guessObj
-                          ? guessChars[colIdx] || ""
-                          : isCurrentRow
-                          ? currentChars[colIdx] || ""
-                          : "";
-                        const status = guessObj ? guessObj.eval[colIdx] : null;
-                        const colorClass =
-                          status === "green"
-                            ? "bg-emerald-600 border-emerald-400 text-white"
-                            : status === "orange"
-                            ? "bg-amber-500 border-amber-300 text-slate-950"
-                            : status === "red"
-                            ? "bg-rose-700/85 border-rose-500/70 text-rose-100"
-                            : isCurrentRow && letter
+                        let ch = "";
+                        let boxCls = "bg-slate-950 border-slate-800 text-white";
+                        if (guessObj) {
+                          ch = guessChars[colIdx] || "";
+                          const st = guessObj.eval[colIdx];
+                          if (st === "green") boxCls = "bg-emerald-600 border-emerald-500 text-white";
+                          else if (st === "orange") boxCls = "bg-amber-500 border-amber-400 text-slate-950";
+                          else boxCls = "bg-rose-900/80 border-rose-700 text-rose-100";
+                        } else if (isCurrent) {
+                          ch = activeChars[colIdx] || "";
+                          boxCls = ch
                             ? "bg-slate-800 border-indigo-400 text-white"
-                            : "bg-slate-900 border-slate-700 text-white";
+                            : "bg-slate-950 border-slate-700 text-white";
+                        }
                         return (
                           <div
                             key={colIdx}
-                            className={`aspect-square rounded-xl border font-extrabold text-xl flex items-center justify-center transition ${colorClass}`}
+                            className={`h-10 rounded-xl border font-extrabold text-base flex items-center justify-center ${boxCls}`}
                           >
-                            {letter}
+                            {ch}
                           </div>
                         );
                       })}
@@ -3885,26 +4641,39 @@ export default function App() {
                 })}
               </div>
 
+              {wordFinished && (
+                <div className="text-center">
+                  <button
+                    onClick={() => handleRequestNewMatch("wordle")}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                  >
+                    Yeni Kelime Oyunu
+                  </button>
+                </div>
+              )}
+
               <div className="space-y-1.5 pt-1">
-                {KEYBOARD_ROWS.map((kRow, rIdx) => (
+                {KEYBOARD_ROWS.map((row, rIdx) => (
                   <div key={rIdx} className="flex justify-center gap-1">
-                    {kRow.map((k) => {
-                      const keySt = wordLetterStatuses[k];
-                      const keyStyle =
-                        keySt === "green"
-                          ? "bg-emerald-600 border border-emerald-400 text-white"
-                          : keySt === "orange"
-                          ? "bg-amber-500 border border-amber-300 text-slate-950"
-                          : keySt === "red"
-                          ? "bg-rose-800/80 border border-rose-600/60 text-rose-200"
-                          : "bg-slate-800 hover:bg-slate-700 text-slate-100";
+                    {row.map((k) => {
+                      const isSpecial = k === "GIR" || k === "SIL";
+                      const st = wordLetterStatuses[k];
+                      let keyCls = "bg-slate-800 hover:bg-slate-700 text-slate-100 border-slate-700";
+                      if (!isSpecial) {
+                        if (st === "green") keyCls = "bg-emerald-600 text-white border-emerald-500";
+                        else if (st === "orange") keyCls = "bg-amber-500 text-slate-950 border-amber-400";
+                        else if (st === "red") keyCls = "bg-rose-950/80 text-rose-300 border-rose-800/70";
+                      } else if (k === "GIR") {
+                        keyCls = "bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-500";
+                      }
                       return (
                         <button
                           key={k}
+                          type="button"
                           onClick={() => handleWordKey(k)}
                           className={`${
-                            k === "GIR" || k === "SIL" ? "px-2.5 text-[11px]" : "w-7 text-xs"
-                          } h-9 rounded-lg ${keyStyle} font-bold active:scale-95 transition`}
+                            isSpecial ? "px-2.5 text-[11px] font-extrabold" : "w-7 sm:w-8 text-xs font-bold"
+                          } h-9 rounded-lg border active:scale-95 transition flex items-center justify-center ${keyCls}`}
                         >
                           {k === "GIR" ? "GİR" : k === "SIL" ? "⌫" : k}
                         </button>
@@ -3917,50 +4686,32 @@ export default function App() {
           )}
 
           {activeMatch.gameType === "sudoku" && (
-            <div className="space-y-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2">
-                <p className="text-sm font-semibold text-center text-indigo-300">{sudokuMessage}</p>
-                {activeMatch.isBot && (
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px] text-slate-400">
-                      <span>{activeMatch.opponent.name} İlerlemesi</span>
-                      <span>%{oppSudokuProgress}</span>
-                    </div>
-                    <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-emerald-400 transition-all" style={{ width: `${oppSudokuProgress}%` }} />
-                    </div>
-                  </div>
-                )}
-                {sudokuWinner && (
-                  <div className="pt-1 text-center">
-                    <button
-                      onClick={() => handleRequestNewMatch("sudoku")}
-                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
-                    >
-                      {activeMatch.isBot ? "Yeni Sudoku Bulmacası" : "Yeni Maç Daveti Gönder"}
-                    </button>
-                  </div>
-                )}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3.5 text-center">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>4x4 Hız Sudoku</span>
+                {activeMatch.isBot && <span>Rakip: %{oppSudokuProgress}</span>}
               </div>
 
-              <div className="grid grid-cols-4 gap-2 max-w-[280px] mx-auto bg-slate-900 p-2.5 rounded-2xl border border-slate-800">
+              <p className="text-xs font-semibold text-amber-300">{sudokuMessage}</p>
+
+              <div className="grid grid-cols-4 gap-1.5 max-w-[240px] mx-auto">
                 {sudokuBoard.map((row, r) =>
                   row.map((val, c) => {
                     const isFixed = SUDOKU_PUZZLES[sudokuIndex].puzzle[r][c] !== 0;
-                    const isSelected = selectedCell[0] === r && selectedCell[1] === c;
+                    const isSel = selectedCell[0] === r && selectedCell[1] === c;
                     const conflict = !isFixed && val !== 0 && hasSudokuConflict(sudokuBoard, r, c, val);
                     return (
                       <button
                         key={`${r}-${c}`}
                         onClick={() => setSelectedCell([r, c])}
-                        className={`aspect-square rounded-xl text-xl font-extrabold flex items-center justify-center border transition ${
+                        className={`aspect-square rounded-xl border text-xl font-extrabold flex items-center justify-center transition ${
                           conflict
-                            ? "border-rose-500 bg-rose-950/60 text-rose-300"
-                            : isSelected
-                            ? "border-indigo-400 bg-indigo-600/30 text-white"
+                            ? "bg-rose-950/90 border-rose-500 text-rose-300"
+                            : isSel
+                            ? "bg-indigo-600/30 border-indigo-400 text-white"
                             : isFixed
-                            ? "border-slate-700 bg-slate-800/90 text-amber-300"
-                            : "border-slate-800 bg-slate-950 text-slate-100"
+                            ? "bg-slate-800/90 border-slate-700 text-cyan-300"
+                            : "bg-slate-950 border-slate-800 text-white"
                         }`}
                       >
                         {val || ""}
@@ -3970,411 +4721,288 @@ export default function App() {
                 )}
               </div>
 
-              <div className="grid grid-cols-4 gap-2 max-w-[280px] mx-auto">
+              <div className="grid grid-cols-4 gap-2 max-w-[240px] mx-auto">
                 {[1, 2, 3, 4].map((num) => (
                   <button
                     key={num}
                     onClick={() => handleSudokuNumber(num)}
-                    className="py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-extrabold text-lg text-white active:scale-95"
+                    className="py-2.5 rounded-xl bg-slate-800 hover:bg-indigo-600 font-extrabold text-sm text-white transition"
                   >
                     {num}
                   </button>
                 ))}
               </div>
+
+              {sudokuWinner && (
+                <button
+                  onClick={() => handleRequestNewMatch("sudoku")}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                >
+                  Yeni Sudoku
+                </button>
+              )}
             </div>
           )}
         </main>
 
-        {matchDrawerOpen && (
-          <div className="fixed inset-x-0 bottom-14 z-40 max-w-md mx-auto bg-slate-900 border-t border-x border-slate-700 rounded-t-3xl shadow-2xl p-4 space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <span className="text-sm font-bold text-white flex items-center gap-2">
-                <MessageCircle className="w-4 h-4 text-indigo-400" />
-                Maç Sohbeti ({activeMatch.opponent.name})
-              </span>
-              <button onClick={() => setMatchDrawerOpen(false)} className="p-1 rounded-lg bg-slate-800 text-slate-300">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="h-44 overflow-y-auto space-y-2 pr-1">
-              {matchMessages.map((m) => {
-                const mine = m.senderId === myId;
-                if (m.senderId === "sys") {
-                  return <div key={m.id} className="text-center text-[11px] text-slate-400 py-1">{m.text}</div>;
-                }
-                return (
-                  <div key={m.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
-                    <span className="text-[10px] text-slate-400 mb-0.5">{m.senderName}</span>
-                    <div className={`px-3 py-1.5 rounded-2xl text-xs max-w-[80%] ${mine ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-100"}`}>
-                      {m.text}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {QUICK_REPLIES.map((qr) => (
-                <button
-                  key={qr}
-                  onClick={() => sendMatchChatText(qr)}
-                  className="shrink-0 px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-indigo-300 border border-slate-700"
-                >
-                  {qr}
-                </button>
-              ))}
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                sendMatchChatText(matchInput);
-              }}
-              className="flex gap-2"
-            >
-              <input
-                type="text"
-                value={matchInput}
-                onChange={(e) => setMatchInput(e.target.value)}
-                placeholder="Rakibine mesaj yaz..."
-                className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
-              />
-              <button type="submit" className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white">
-                <Send className="w-4 h-4" />
-              </button>
-            </form>
-          </div>
-        )}
-
-        <div className="fixed bottom-0 inset-x-0 z-30 bg-slate-950/95 border-t border-slate-800 p-2.5">
-          <div className="max-w-md mx-auto">
+        <div className="fixed bottom-0 inset-x-0 z-40 max-w-md mx-auto">
+          <div className="bg-slate-900 border-t border-x border-slate-800 rounded-t-2xl shadow-2xl">
             <button
               onClick={() => {
                 setMatchDrawerOpen((o) => !o);
                 setMatchUnread(0);
               }}
-              className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 flex items-center justify-between text-sm font-semibold"
+              className="w-full px-4 py-3 flex items-center justify-between text-xs font-bold text-slate-200"
             >
-              <span className="flex items-center gap-2 text-indigo-300">
-                <MessageCircle className="w-4 h-4" />
-                Maç Sohbeti
-              </span>
-              <div className="flex items-center gap-2">
+              <span className="flex items-center gap-2">
+                <MessageCircle className="w-4 h-4 text-indigo-400" />
+                Maç Sohbeti ({activeMatch.opponent.name})
                 {matchUnread > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[11px] font-bold">
+                  <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px]">
                     {matchUnread}
                   </span>
                 )}
-                {matchDrawerOpen ? (
-                  <ChevronDown className="w-4 h-4 text-slate-400" />
-                ) : (
-                  <ChevronUp className="w-4 h-4 text-slate-400" />
-                )}
-              </div>
+              </span>
+              {matchDrawerOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
             </button>
+
+            {matchDrawerOpen && (
+              <div className="px-3.5 pb-3.5 space-y-2.5 border-t border-slate-800/80 pt-2.5">
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  {QUICK_REPLIES.map((qr) => (
+                    <button
+                      key={qr}
+                      onClick={() => sendMatchChatText(qr)}
+                      className="shrink-0 px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 border border-slate-700"
+                    >
+                      {qr}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                  {matchMessages.map((m) => {
+                    const mine = m.senderId === myId;
+                    const sys = m.senderId === "sys";
+                    if (sys) {
+                      return (
+                        <div key={m.id} className="text-[11px] text-center text-slate-400 py-0.5">
+                          {m.text}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div
+                        key={m.id}
+                        className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
+                      >
+                        <span className="text-[10px] text-slate-500 px-1">
+                          {mine ? "Sen" : m.senderName}
+                        </span>
+                        <div
+                          className={`px-3 py-1.5 rounded-2xl text-xs max-w-[82%] ${
+                            mine
+                              ? "bg-indigo-600 text-white rounded-br-sm"
+                              : "bg-slate-800 text-slate-100 rounded-bl-sm"
+                          }`}
+                        >
+                          {m.text}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    sendMatchChatText(matchInput);
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <input
+                    type="text"
+                    value={matchInput}
+                    onChange={(e) => setMatchInput(e.target.value)}
+                    placeholder="Mesaj yaz..."
+                    className="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="submit"
+                    className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </form>
+              </div>
+            )}
           </div>
         </div>
       </div>
     );
   }
 
-  const bannedEntries = Object.values(bannedUsers || {});
-  const totalBluffTablePlayers = 1 + bluffJoinedMembers.length;
-  const neededBotsForBluff = Math.max(0, 3 - totalBluffTablePlayers);
-  const resumableGameMeta = resumableMatch
-    ? GAMES_META.find((g) => g.id === resumableMatch.gameType) || GAMES_META[0]
-    : null;
-
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-12">
-      <header className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+    <div className="min-h-screen bg-slate-950 text-slate-100 pb-10">
+      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
             <Gamepad2 className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <h1 className="text-base font-extrabold leading-tight text-white">Düello Arenası</h1>
+              <h1 className="text-base font-extrabold text-white leading-tight">Düello Arenası</h1>
               {isFdAdmin && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300 font-bold flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-[10px] font-bold text-amber-300">
                   <Shield className="w-3 h-3" />
                   Yönetici
                 </span>
               )}
             </div>
-            <p className="text-xs text-emerald-400">
-              ● {nickname.trim()} • {myWins} Puan
+            <p className="text-xs text-emerald-400 font-medium">
+              • {nickname.trim()} • {myWins} Puan
             </p>
           </div>
         </div>
+
         <button
           onClick={() => {
+            clearAllGameTimers();
             if (dbRef.current) {
               remove(ref(dbRef.current, `users/${myId}`));
             }
             setEnteredLobby(false);
             setIsFdAuthenticated(false);
             setFdPasswordInput("");
+            setFdPasswordConfirm("");
+            setActiveMatch(null);
+            setResumableMatch(null);
+            setExitConfirmOpen(false);
+            setBluffLobbyOpen(false);
+            setBluffTableId(null);
+            setJoinedBluffTable(null);
+            setDmTarget(null);
+            setIncomingDm(null);
             if (typeof window !== "undefined") {
               window.localStorage.setItem("duello_entered_lobby", "0");
               window.localStorage.setItem("duello_fd_authed", "0");
+              window.localStorage.removeItem("duello_active_match");
+              window.localStorage.removeItem("duello_resumable_match");
             }
           }}
-          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300"
+          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300"
         >
           Çıkış
         </button>
       </header>
 
       <main className="max-w-md mx-auto p-4 space-y-5">
-        {resumableMatch && resumableGameMeta && (
-          <div className="bg-indigo-950/75 border border-indigo-400/50 rounded-2xl p-4 shadow-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
-                <CornerUpLeft className="w-4 h-4" />
-                Yarıda Kalan Maçın Var
-              </span>
-              <span className="text-[11px] text-slate-300">{resumableGameMeta.name}</span>
-            </div>
-            <p className="text-xs text-white">
-              <strong>{resumableMatch.opponent?.name || "Rakip"}</strong> ile maçından lobiye döndün. İstersen hemen geri dönebilirsin.
-            </p>
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                onClick={handleResumeSavedMatch}
-                className="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white flex items-center justify-center gap-1.5"
-              >
-                <CornerUpLeft className="w-4 h-4" />
-                Oyuna Geri Dön
-              </button>
-              <button
-                onClick={handleDismissResumableMatch}
-                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-xs text-slate-200 flex items-center justify-center gap-1.5"
-              >
-                <X className="w-4 h-4" />
-                Maçı Kapat
-              </button>
-            </div>
-          </div>
-        )}
-
         {noticeBanner && (
-          <div className="bg-amber-950/70 border border-amber-500/50 rounded-2xl p-3.5 shadow-xl flex items-start justify-between gap-2">
+          <div className="bg-indigo-950/70 border border-indigo-500/40 rounded-2xl p-3.5 flex items-start justify-between gap-3">
             <div className="space-y-0.5">
-              <div className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                {noticeBanner.title}
-              </div>
-              <p className="text-xs text-white">{noticeBanner.text}</p>
+              <div className="text-xs font-extrabold text-indigo-200">{noticeBanner.title}</div>
+              <p className="text-xs text-slate-200">{noticeBanner.text}</p>
             </div>
             <button
               onClick={() => setNoticeBanner(null)}
-              className="p-1 rounded-lg bg-slate-900/70 text-slate-300 hover:text-white shrink-0"
+              className="p-1 rounded-lg bg-slate-900/70 text-slate-300 hover:text-white"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         )}
 
-        {/* Davet edilen oyuncu için Blöf masası bekleme kartı */}
-        {joinedBluffTable && (
-          <section className="bg-emerald-950/65 border border-emerald-400/50 rounded-2xl p-4 space-y-3 shadow-xl">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-extrabold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
-                <Users className="w-4 h-4" />
-                Blöf Masasındasın
+        {resumableMatch && (
+          <div className="bg-amber-950/45 border border-amber-500/40 rounded-2xl p-3.5 flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="text-xs font-extrabold text-amber-300">Yarım Kalan Maçın Var</div>
+              <p className="text-xs text-slate-200">
+                {GAMES_META.find((g) => g.id === resumableMatch.gameType)?.name || "Oyun"} •{" "}
+                {resumableMatch.opponent?.name || "Rakip"}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={handleResumeSavedMatch}
+                className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold flex items-center gap-1"
+              >
+                <Play className="w-3.5 h-3.5" />
+                Dön
+              </button>
+              <button
+                onClick={handleDismissResumableMatch}
+                className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300"
+                title="Maçı kapat"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {incomingDm && !dmTarget && (
+          <div className="bg-slate-900 border border-indigo-500/50 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-lg">
+            <div className="min-w-0">
+              <div className="text-[11px] font-bold text-indigo-400">
+                Yeni Özel Mesaj • {incomingDm.peer.name}
               </div>
+              <p className="text-xs text-white truncate">{incomingDm.text}</p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => openDirectMessage(incomingDm.peer)}
+                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+              >
+                Aç
+              </button>
+              <button
+                onClick={() => setIncomingDm(null)}
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-400"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {joinedBluffTable && (
+          <div className="bg-indigo-950/50 border border-indigo-400/50 rounded-2xl p-4 space-y-3 shadow-xl">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-300">
+                Blöf Masasındasın
+              </span>
               <button
                 onClick={leaveJoinedBluffTable}
-                className="px-2.5 py-1 rounded-lg bg-slate-900/80 text-[11px] font-semibold text-rose-300"
+                className="px-2.5 py-1 rounded-lg bg-slate-900/80 text-[11px] font-semibold text-slate-300 hover:text-white"
               >
                 Masadan Ayrıl
               </button>
             </div>
-            <p className="text-xs text-white">
-              <strong>{joinedBluffTable.hostName}</strong> oyunu başlattığında otomatik olarak Blöf maçına geçiş yapacaksın.
+            <p className="text-xs text-slate-200">
+              Kurucu: <strong className="text-white">{joinedBluffTable.hostName}</strong> • Oyunun başlatılması bekleniyor...
             </p>
-            <div className="bg-slate-950/80 border border-emerald-500/30 rounded-xl p-2.5 text-xs text-emerald-200">
-              Masadaki Oyuncular:{" "}
-              <span className="text-white font-bold">
-                {(joinedBluffTable.memberNames || [joinedBluffTable.hostName, nickname.trim()]).join(", ")}
-              </span>
-            </div>
-          </section>
-        )}
-
-        {/* Blöf Çoklu Davet & Masa Bekleme Ekranı (Masa Kurucu) */}
-        {bluffLobbyOpen && (
-          <section className="bg-indigo-950/55 border border-indigo-400/50 rounded-2xl p-4 space-y-3.5 shadow-xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-extrabold text-white flex items-center gap-1.5">
-                  <UserPlus className="w-4 h-4 text-indigo-300" />
-                  Blöf Masası — Oyuncu Davet Et
-                </h2>
-                <p className="text-[11px] text-indigo-200/85">
-                  Daveti kabul eden herkes masada görünür. Başlat dediğinde masadaki tüm oyuncularla oyun aynı anda açılır.
-                </p>
-              </div>
-              <button
-                onClick={closeBluffTable}
-                className="p-1.5 rounded-xl bg-slate-900/80 text-slate-300"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="bg-slate-950/80 border border-indigo-500/30 rounded-xl p-2.5 space-y-1 text-xs">
-              <div className="font-bold text-emerald-300">
-                Masadaki Kişiler ({totalBluffTablePlayers}):{" "}
-                <span className="text-white font-semibold">
-                  {[nickname.trim() || "Sen", ...bluffJoinedMembers.map((m) => m.name)].join(", ")}
+            <div className="flex flex-wrap gap-1.5">
+              {(joinedBluffTable.memberNames || []).map((mName, idx) => (
+                <span
+                  key={`${mName}_${idx}`}
+                  className="px-2.5 py-1 rounded-full bg-slate-900 border border-indigo-500/30 text-[11px] font-semibold text-indigo-200"
+                >
+                  {mName}
                 </span>
-              </div>
-              <div className="text-[11px] text-slate-400">
-                {neededBotsForBluff > 0
-                  ? `Şu an başlatılırsa +${neededBotsForBluff} bot eklenecek (toplam 3 kişi).`
-                  : "En az 3 gerçek oyuncu hazır, bot eklenmeden başlayacak!"}
-              </div>
+              ))}
             </div>
-
-            <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
-              {users.map((u) => {
-                const invStatus = bluffInvitedIds[u.id];
-                const isBusy = u.status === "in_game";
-                return (
-                  <div
-                    key={`bluff-inv-${u.id}`}
-                    className="px-3 py-2 rounded-xl bg-slate-950/75 border border-slate-800 flex items-center justify-between text-xs"
-                  >
-                    <span className="font-semibold text-white truncate">{u.name}</span>
-                    {invStatus === "accepted" ? (
-                      <span className="text-[11px] font-bold text-emerald-400">Masada ✓</span>
-                    ) : invStatus === "pending" ? (
-                      <span className="text-[11px] font-semibold text-amber-300">Davet gönderildi</span>
-                    ) : invStatus === "declined" ? (
-                      <button
-                        disabled={isBusy}
-                        onClick={() => sendBluffInviteToUser(u)}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200"
-                      >
-                        Tekrar Davet Et
-                      </button>
-                    ) : (
-                      <button
-                        disabled={isBusy}
-                        onClick={() => sendBluffInviteToUser(u)}
-                        className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-[11px] font-bold text-white"
-                      >
-                        {isBusy ? "Oyunda" : "Davet Et"}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <button
-              onClick={handleStartBluffFromTable}
-              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-extrabold text-xs text-white flex items-center justify-center gap-1.5 shadow-lg"
-            >
-              <Play className="w-4 h-4" />
-              Oyunu Başlat ({Math.max(3, totalBluffTablePlayers)} Kişi)
-            </button>
-          </section>
-        )}
-
-        {isFdAdmin && (
-          <section className="bg-amber-950/35 border border-amber-500/40 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-amber-300 flex items-center gap-2">
-                <Shield className="w-4 h-4" />
-                FD Yönetici Moderasyonu
-              </h2>
-              <span className="text-[11px] text-amber-200/80">
-                Şikayetler ({reportsList.length}) • Engelli ({bannedEntries.length})
-              </span>
-            </div>
-
-            {reportsList.length > 0 ? (
-              <div className="space-y-2">
-                <div className="text-[11px] font-semibold text-amber-200">Gelen Şikayetler:</div>
-                {reportsList.map((rep) => (
-                  <div
-                    key={rep.id}
-                    className="p-2.5 rounded-xl bg-slate-950/80 border border-amber-500/30 flex items-center justify-between gap-2 text-xs"
-                  >
-                    <div className="min-w-0">
-                      <div className="font-bold text-white truncate">
-                        {rep.targetName}{" "}
-                        <span className="text-[10px] font-normal text-slate-400">
-                          (Bildiren: {rep.reporterName})
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-amber-200/90 truncate">{rep.reason}</div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() =>
-                          handleKickAndBanUser({ id: rep.targetId, name: rep.targetName }, rep.id)
-                        }
-                        className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] flex items-center gap-1"
-                      >
-                        <Ban className="w-3 h-3" />
-                        At
-                      </button>
-                      <button
-                        onClick={() => {
-                          setReportsList((prev) => prev.filter((x) => x.id !== rep.id));
-                          if (dbRef.current) remove(ref(dbRef.current, `reports/${rep.id}`));
-                        }}
-                        className="p-1.5 rounded-lg bg-slate-800 text-slate-300"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-slate-400">
-                Bekleyen şikayet yok. Aktif oyunculardan herhangi birini doğrudan atabilir veya lobi sohbetindeki uygunsuz mesajları silebilirsin.
-              </p>
-            )}
-
-            {bannedEntries.length > 0 && (
-              <div className="pt-1 border-t border-amber-500/20 space-y-1.5">
-                <div className="text-[11px] font-semibold text-slate-300">Siteden Atılanlar:</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {bannedEntries.map((b) => (
-                    <span
-                      key={b.id}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-950/70 border border-rose-500/40 text-[11px] text-rose-200"
-                    >
-                      {b.name}
-                      <button
-                        onClick={() => handleUnbanUser(b.id)}
-                        className="text-rose-300 hover:text-white underline text-[10px]"
-                      >
-                        Kaldır
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </section>
+          </div>
         )}
 
         {incomingInvite && (
-          <div className="bg-indigo-950/70 border border-indigo-500/50 rounded-2xl p-4 shadow-xl space-y-3">
-            <div className="flex items-center gap-2 text-indigo-300 text-xs font-bold uppercase tracking-wider">
-              <Bell className="w-4 h-4" />
-              Gelen Meydan Okuma
+          <div className="bg-indigo-950/60 border border-indigo-500/50 rounded-2xl p-4 space-y-3 shadow-xl">
+            <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
+              <Bell className="w-4 h-4 animate-bounce" />
+              GELEN OYUN DAVETİ
             </div>
             <p className="text-sm text-white">
-              <span className="font-bold">{incomingInvite.fromName}</span> seni{" "}
-              <span className="font-bold text-amber-300">{incomingInvite.gameName}</span> oynamaya davet ediyor!
+              <strong className="text-indigo-300">{incomingInvite.fromName}</strong> seni{" "}
+              <strong className="text-amber-300">{incomingInvite.gameName}</strong> oyununa davet ediyor!
             </p>
             <div className="grid grid-cols-2 gap-2.5">
               <button
@@ -4395,50 +5023,17 @@ export default function App() {
           </div>
         )}
 
-        {incomingDm && (
-          <div className="bg-emerald-950/70 border border-emerald-500/50 rounded-2xl p-4 shadow-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-emerald-300 text-xs font-bold uppercase tracking-wider">
-                <MessageCircle className="w-4 h-4" />
-                Gelen Özel Mesaj
-              </div>
-              <span className="text-[11px] font-semibold text-emerald-200">{incomingDm.peer.name}</span>
-            </div>
-            <p className="text-sm text-white bg-slate-950/70 border border-emerald-500/20 rounded-xl px-3 py-2">
-              {incomingDm.text}
-            </p>
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                onClick={() => {
-                  const peerToOpen = incomingDm.peer;
-                  setIncomingDm(null);
-                  openDirectMessage(peerToOpen);
-                }}
-                className="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white flex items-center justify-center gap-1.5"
-              >
-                <MessageCircle className="w-4 h-4" />
-                Mesajı Aç
-              </button>
-              <button
-                onClick={() => setIncomingDm(null)}
-                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-xs text-slate-200 flex items-center justify-center gap-1.5"
-              >
-                <X className="w-4 h-4" />
-                Kapat
-              </button>
-            </div>
-          </div>
-        )}
-
         {outgoingInvite && (
           <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-3.5 flex items-center justify-between">
-            <div className="text-xs">
-              <span className="text-amber-300 font-bold">{outgoingInvite.toName}</span> kişisine{" "}
-              <span className="font-semibold text-white">{outgoingInvite.gameName}</span> daveti gönderildi...
+            <div className="text-xs text-amber-200">
+              <strong>{outgoingInvite.toName}</strong> kişisine{" "}
+              <strong>{outgoingInvite.gameName}</strong> daveti gönderildi...
             </div>
             <button
               onClick={() => {
-                if (dbRef.current) remove(ref(dbRef.current, `invites/${outgoingInvite.toId}`));
+                if (dbRef.current && outgoingInvite.toId) {
+                  remove(ref(dbRef.current, `invites/${outgoingInvite.toId}`));
+                }
                 setOutgoingInvite(null);
               }}
               className="text-xs text-slate-400 hover:text-white underline ml-2"
@@ -4448,123 +5043,154 @@ export default function App() {
           </div>
         )}
 
-        <section className="bg-gradient-to-br from-indigo-950/70 via-slate-900 to-slate-900 border border-indigo-500/30 rounded-2xl p-4 space-y-3">
+        <section className="space-y-2.5">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Bot className="w-5 h-5 text-indigo-400" />
-              <h2 className="text-sm font-bold text-white">Pratik Yap (Botla Oyna)</h2>
-            </div>
-            <span className="text-[11px] text-indigo-300 font-medium">Anında Başla</span>
+            <h2 className="text-sm font-bold text-slate-300 flex items-center gap-1.5">
+              <Swords className="w-4 h-4 text-indigo-400" />
+              Hızlı Eşleş veya Oyun Seç
+            </h2>
+            <span className="text-[11px] text-slate-500">Bot veya Canlı</span>
           </div>
-          <div className="grid grid-cols-2 gap-2">
+
+          <button
+            onClick={handleRandomMatch}
+            className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 active:scale-[0.99] transition shadow-lg shadow-indigo-600/25 flex items-center justify-between text-white"
+          >
+            <span className="flex items-center gap-2.5 text-sm font-extrabold">
+              <Shuffle className="w-4 h-4" />
+              Rastgele Eşleş
+            </span>
+            <span className="text-[11px] font-semibold bg-white/15 px-2.5 py-0.5 rounded-full">
+              Oyun + Sohbet
+            </span>
+          </button>
+
+          <div className="grid grid-cols-2 gap-2.5">
             {GAMES_META.map((g) => {
               const IconComp = g.icon;
               return (
                 <button
                   key={g.id}
-                  onClick={() => startMatch({ id: "bot_arena", name: "Arena Botu" }, g.id, true, null, true)}
-                  className="p-2.5 rounded-xl bg-slate-950/80 hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/40 text-left flex items-center gap-2.5 transition active:scale-[0.98]"
+                  onClick={() => {
+                    if (g.id === "bluff") {
+                      openBluffTable(null);
+                    } else {
+                      const pickedBot =
+                        LOBBY_BOT_PLAYERS[Math.floor(Math.random() * LOBBY_BOT_PLAYERS.length)];
+                      startMatch(pickedBot, g.id, true, null, true, false);
+                    }
+                  }}
+                  className="bg-slate-900 hover:bg-slate-800/90 border border-slate-800 hover:border-indigo-500/40 rounded-2xl p-3.5 text-left transition active:scale-[0.98] space-y-1.5"
                 >
-                  <IconComp className="w-4 h-4 text-indigo-400 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">{g.name}</div>
-                    <div className="text-[10px] text-slate-400 truncate">{g.badge}</div>
+                  <div className="flex items-center justify-between">
+                    <IconComp className="w-4 h-4 text-indigo-400" />
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                      {g.badge}
+                    </span>
                   </div>
+                  <div className="font-bold text-sm text-white">{g.name}</div>
+                  <div className="text-[11px] text-slate-400 leading-snug">{g.desc}</div>
                 </button>
               );
             })}
           </div>
         </section>
 
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
               <Users className="w-4 h-4 text-emerald-400" />
-              Aktif Oyuncular ({users.length})
+              Aktif Oyuncular ({activeLobbyPlayers.length})
             </h2>
             <span className="text-[11px] text-slate-400">Davet et veya mesaj at</span>
           </div>
 
-          {users.length === 0 ? (
-            <p className="text-xs text-slate-400 py-3 text-center">
-              Şu an lobide başka oyuncu görünmüyor. Arkadaşına site linkini gönder veya Bot ile oyna!
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {users.map((u) => {
-                const isBusy = u.status === "in_game";
-                const unreadDm = dmUnreadByPeer[u.id] || 0;
-                return (
-                  <div
-                    key={u.id}
-                    className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-2"
+          <div className="space-y-2">
+            {activeLobbyPlayers.map((u) => {
+              const inGame = u.status === "in_game";
+              const unreadForPeer = dmUnreadByPeer[u.id] || 0;
+              return (
+                <div
+                  key={u.id}
+                  className="flex items-center justify-between bg-slate-950/80 border border-slate-800/90 rounded-xl px-3 py-2.5 gap-2"
+                >
+                  <button
+                    onClick={() => {
+                      if (inGame) return;
+                      setSelectedGameForInvite("kelimelik");
+                      setSelectedTargetUser(u);
+                    }}
+                    className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <CircleDot className={`w-3.5 h-3.5 shrink-0 ${isBusy ? "text-amber-400" : "text-emerald-400"}`} />
-                      <div className="truncate">
-                        <div className="text-sm font-semibold text-white truncate">
-                          {u.name} <span className="text-xs text-amber-300 font-bold">({Number(u.wins || 0)}p)</span>
-                        </div>
-                        <div className="text-[11px] text-slate-400">{isBusy ? "Oyunda" : "Müsait"}</div>
+                    <span
+                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                        inGame ? "bg-amber-400" : "bg-emerald-400"
+                      }`}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white truncate">{u.name}</div>
+                      <div className="text-[11px] text-slate-400">
+                        {inGame ? "Oyunda" : "Çevrim içi"} • {u.wins || 0} Puan
                       </div>
                     </div>
+                  </button>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => openDirectMessage(u)}
-                        className="relative p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                        {unreadDm > 0 && (
-                          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-600 text-[10px] font-bold flex items-center justify-center text-white">
-                            {unreadDm}
-                          </span>
-                        )}
-                      </button>
-
-                      {isFdAdmin ? (
-                        <button
-                          onClick={() => handleKickAndBanUser(u)}
-                          title="Siteden At"
-                          className="p-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/35 border border-rose-500/40 text-rose-300"
-                        >
-                          <Ban className="w-4 h-4" />
-                        </button>
-                      ) : (
-                        !isReservedFdName(u.name) && (
-                          <button
-                            onClick={() => {
-                              setReportTargetUser(u);
-                              setReportReason("");
-                            }}
-                            title="Şikayet Et"
-                            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300"
-                          >
-                            <Flag className="w-4 h-4" />
-                          </button>
-                        )
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => openDirectMessage(u)}
+                      className="relative px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-1"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 text-indigo-400" />
+                      DM
+                      {unreadForPeer > 0 && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-indigo-600 text-[10px] text-white">
+                          {unreadForPeer}
+                        </span>
                       )}
+                    </button>
 
+                    {!u.isBot && (
                       <button
-                        disabled={isBusy}
                         onClick={() => {
-                          setSelectedTargetUser(u);
-                          setSelectedGameForInvite("bluff");
+                          setReportTargetUser(u);
+                          setReportReason("");
                         }}
-                        className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs font-bold text-white flex items-center gap-1"
+                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-amber-950/70 text-slate-400 hover:text-amber-300"
+                        title="Şikayet Et"
                       >
-                        <Swords className="w-3.5 h-3.5" />
-                        Davet Et
+                        <Flag className="w-3.5 h-3.5" />
                       </button>
-                    </div>
+                    )}
+
+                    {isFdAdmin && !u.isBot && (
+                      <button
+                        onClick={() => handleKickAndBanUser(u)}
+                        className="p-1.5 rounded-lg bg-rose-950/70 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30"
+                        title="Siteden At ve Engelle"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    {!inGame && (
+                      <button
+                        onClick={() => {
+                          setSelectedGameForInvite("kelimelik");
+                          setSelectedTargetUser(u);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 text-xs font-semibold text-indigo-300"
+                      >
+                        Davet
+                      </button>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          )}
+                </div>
+              );
+            })}
+          </div>
         </section>
 
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
               <Trophy className="w-4 h-4 text-amber-400" />
@@ -4574,122 +5200,211 @@ export default function App() {
           </div>
 
           <div className="space-y-1.5">
-            {topFiveWinners.map((entry, idx) => (
+            {topFiveWinners.map((player, idx) => (
               <div
-                key={`top-${entry.id}`}
-                className={`px-3 py-2 rounded-xl border flex items-center justify-between text-xs ${
-                  entry.isMe
-                    ? "bg-indigo-950/50 border-indigo-500/40 text-white"
-                    : "bg-slate-950/70 border-slate-800 text-slate-200"
-                }`}
+                key={player.id}
+                className="flex items-center justify-between bg-slate-950/75 border border-slate-800/80 rounded-xl px-3 py-2 text-xs"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="w-5 h-5 rounded-full bg-slate-800 text-amber-300 font-extrabold text-[11px] flex items-center justify-center shrink-0">
+                  <span
+                    className={`w-5 h-5 rounded-full flex items-center justify-center font-extrabold text-[11px] ${
+                      idx === 0
+                        ? "bg-amber-400 text-slate-950"
+                        : idx === 1
+                        ? "bg-slate-300 text-slate-950"
+                        : idx === 2
+                        ? "bg-amber-700 text-white"
+                        : "bg-slate-800 text-slate-300"
+                    }`}
+                  >
                     {idx + 1}
                   </span>
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${entry.isOnline ? "bg-emerald-400" : "bg-slate-600"}`} />
-                  <span className="font-semibold truncate">
-                    {entry.name} {entry.isMe ? "(Sen)" : ""}
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      player.isOnline ? "bg-emerald-400" : "bg-slate-600"
+                    }`}
+                  />
+                  <span className="font-semibold text-white truncate">
+                    {player.name} {player.isMe ? "(Sen)" : ""}
                   </span>
-                  <span className="text-[10px] text-slate-500 shrink-0">
-                    {entry.isOnline ? "Online" : "Çevrimdışı"}
+                  <span className="text-[10px] text-slate-400">
+                    {player.isOnline ? "Online" : "Çevrimdışı"}
                   </span>
                 </div>
-                <span className="font-extrabold text-amber-300 shrink-0">{entry.wins} Puan</span>
+                <span className="font-extrabold text-amber-300 shrink-0">{player.wins} Puan</span>
               </div>
             ))}
           </div>
         </section>
 
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
               <Clock className="w-4 h-4 text-sky-400" />
-              En Son Online Olanlar (İlk 5)
+              Son Online Olanlar (İlk 5)
             </h2>
-            <span className="text-[11px] text-slate-400">Online olmasalar bile görünür</span>
+            <span className="text-[11px] text-slate-400">Güncel aktivite</span>
           </div>
 
           <div className="space-y-1.5">
-            {lastFiveOnlinePlayers.map((entry, idx) => (
+            {lastFiveOnlinePlayers.map((player, idx) => (
               <div
-                key={`recent-${entry.id}`}
-                className={`px-3 py-2 rounded-xl border flex items-center justify-between text-xs ${
-                  entry.isMe
-                    ? "bg-indigo-950/50 border-indigo-500/40 text-white"
-                    : "bg-slate-950/70 border-slate-800 text-slate-200"
-                }`}
+                key={`recent_${player.id}`}
+                className="flex items-center justify-between bg-slate-950/75 border border-slate-800/80 rounded-xl px-3 py-2 text-xs"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="w-5 h-5 rounded-full bg-slate-800 text-sky-300 font-extrabold text-[11px] flex items-center justify-center shrink-0">
-                    {idx + 1}
-                  </span>
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${entry.isOnline ? "bg-emerald-400" : "bg-slate-600"}`} />
-                  <span className="font-semibold truncate">
-                    {entry.name} {entry.isMe ? "(Sen)" : ""}
+                  <span className="text-[11px] font-bold text-slate-500 w-4">{idx + 1}.</span>
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      player.isOnline ? "bg-emerald-400" : "bg-slate-600"
+                    }`}
+                  />
+                  <span className="font-semibold text-white truncate">
+                    {player.name} {player.isMe ? "(Sen)" : ""}
                   </span>
                 </div>
                 <span className="text-[11px] text-slate-400 shrink-0">
-                  {entry.isOnline ? "Şimdi Online" : formatRelativeTime(entry.lastSeenAt)}
+                  {player.isOnline ? "Şu an online" : formatRelativeTime(player.lastSeenAt)}
                 </span>
               </div>
             ))}
           </div>
         </section>
 
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+        {isFdAdmin && (
+          <section className="bg-amber-950/25 border border-amber-500/40 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-extrabold text-amber-300 flex items-center gap-2">
+                <Shield className="w-4 h-4" />
+                FD Yönetim Paneli
+              </h2>
+              <span className="text-[11px] text-amber-200/80">
+                Şikayet: {reportsList.length} • Engelli: {Object.keys(bannedUsers).length}
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-slate-300">Gelen Şikayetler</div>
+              {reportsList.length === 0 ? (
+                <p className="text-xs text-slate-400 bg-slate-950/70 rounded-xl p-2.5 border border-slate-800">
+                  Henüz şikayet kaydı yok.
+                </p>
+              ) : (
+                reportsList.map((rep) => (
+                  <div
+                    key={rep.id}
+                    className="bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 space-y-2 text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <strong className="text-rose-300">{rep.targetName}</strong>{" "}
+                        <span className="text-slate-400">({rep.reporterName} şikayet etti)</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500">{formatRelativeTime(rep.ts)}</span>
+                    </div>
+                    <p className="text-slate-200">{rep.reason}</p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() =>
+                          handleKickAndBanUser({ id: rep.targetId, name: rep.targetName }, rep.id)
+                        }
+                        className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px]"
+                      >
+                        Siteden At & Engelle
+                      </button>
+                      <button
+                        onClick={() => {
+                          setReportsList((prev) => prev.filter((x) => x.id !== rep.id));
+                          if (dbRef.current) remove(ref(dbRef.current, `reports/${rep.id}`));
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-[11px]"
+                      >
+                        Kapat
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {Object.keys(bannedUsers).length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-xs font-bold text-slate-300">Engellenen Kullanıcılar</div>
+                {Object.values(bannedUsers).map((b) => (
+                  <div
+                    key={b.id}
+                    className="flex items-center justify-between bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-xs"
+                  >
+                    <span className="text-rose-300 font-semibold">{b.name}</span>
+                    <button
+                      onClick={() => handleUnbanUser(b.id)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-emerald-300"
+                    >
+                      Engeli Kaldır
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden">
           <button
             onClick={() => {
               setGlobalChatOpen((o) => !o);
               setGlobalUnread(0);
             }}
-            className="w-full flex items-center justify-between text-left"
+            className="w-full px-4 py-3 flex items-center justify-between text-sm font-bold text-white"
           >
-            <span className="text-sm font-bold text-white flex items-center gap-2">
+            <span className="flex items-center gap-2">
               <MessageCircle className="w-4 h-4 text-indigo-400" />
-              Lobi Genel Sohbeti
+              Genel Lobi Sohbeti
               {globalUnread > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-rose-600 text-[10px] font-bold text-white">
+                <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-[11px] text-white">
                   {globalUnread}
                 </span>
               )}
             </span>
-            {globalChatOpen ? (
-              <ChevronUp className="w-4 h-4 text-slate-400" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-slate-400" />
-            )}
+            {globalChatOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
 
           {globalChatOpen && (
-            <>
-              <div className="h-44 overflow-y-auto space-y-2 pr-1 bg-slate-950/60 rounded-xl p-2.5 border border-slate-800/70">
-                {visibleGlobalMessages.length === 0 ? (
-                  <p className="text-center text-xs text-slate-500 pt-14">Henüz mesaj yok.</p>
-                ) : (
-                  visibleGlobalMessages.map((m) => {
-                    const mine = m.senderId === myId;
-                    return (
-                      <div key={m.id || m.fbKey} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <span className="text-[10px] text-slate-400">{m.senderName}</span>
-                          {isFdAdmin && m.senderId !== "sys" && (
-                            <button
-                              onClick={() => handleDeleteGlobalMessage(m)}
-                              title="Mesajı Sil"
-                              className="text-rose-400 hover:text-rose-300 p-0.5"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                        <div className={`px-3 py-1.5 rounded-2xl text-xs max-w-[82%] ${mine ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-100"}`}>
-                          {m.text}
-                        </div>
+            <div className="px-4 pb-4 space-y-3 border-t border-slate-800/80 pt-3">
+              <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                {visibleGlobalMessages.map((m) => {
+                  const mine = m.senderId === myId;
+                  const canDelete = isFdAdmin && m.senderId !== "sys";
+                  return (
+                    <div
+                      key={m.id}
+                      className={`text-xs rounded-xl px-3 py-2 flex items-start justify-between gap-2 ${
+                        m.senderId === "sys"
+                          ? "bg-indigo-950/40 text-indigo-200 border border-indigo-500/20"
+                          : mine
+                          ? "bg-indigo-600/25 text-white border border-indigo-500/30"
+                          : "bg-slate-950 text-slate-200 border border-slate-800"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <span className="font-bold text-indigo-300 mr-1.5">
+                          {m.senderName}
+                          {m.senderName === "FD" ? " 🛡️" : ""}:
+                        </span>
+                        <span className="break-words">{m.text}</span>
                       </div>
-                    );
-                  })
-                )}
+                      {canDelete && (
+                        <button
+                          onClick={() => handleDeleteGlobalMessage(m)}
+                          className="p-1 rounded-lg bg-rose-950/70 hover:bg-rose-600 text-rose-300 hover:text-white shrink-0"
+                          title="Mesajı Sil"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
               <form onSubmit={handleSendGlobalMessage} className="flex gap-2">
@@ -4697,29 +5412,179 @@ export default function App() {
                   type="text"
                   value={globalInput}
                   onChange={(e) => setGlobalInput(e.target.value)}
-                  placeholder="Lobiye mesaj yaz (1 saatte silinir)..."
-                  className="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  placeholder="Lobiye mesaj yaz..."
+                  className="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
-                <button type="submit" className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white">
-                  <Send className="w-4 h-4" />
+                <button
+                  type="submit"
+                  className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Gönder
                 </button>
               </form>
-            </>
+            </div>
           )}
         </section>
       </main>
 
-      {reportTargetUser && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <form
-            onSubmit={handleSubmitReport}
-            className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl"
-          >
+      {bluffLobbyOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl max-h-[88vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-extrabold text-white">{reportTargetUser.name} kişisini şikayet et</h3>
-                <p className="text-xs text-slate-400">Şikayet FD yönetici paneline düşecektir</p>
+                <h3 className="text-base font-extrabold text-white">Blöf Masası Kur</h3>
+                <p className="text-xs text-slate-400">
+                  En az 3 kişiyle oynanır. Eksik kalan yerler botlarla tamamlanır.
+                </p>
               </div>
+              <button
+                onClick={closeBluffTable}
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 space-y-2">
+              <div className="text-[11px] font-bold text-indigo-300">
+                Masadaki Oyuncular ({1 + bluffJoinedMembers.length}/4)
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <span className="px-2.5 py-1 rounded-full bg-indigo-600/30 border border-indigo-400/50 text-xs font-bold text-white">
+                  {nickname.trim()} (Sen)
+                </span>
+                {bluffJoinedMembers.map((m) => (
+                  <span
+                    key={m.id}
+                    className="px-2.5 py-1 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-xs font-semibold text-emerald-200"
+                  >
+                    {m.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <UserPlus className="w-3.5 h-3.5 text-indigo-400" />
+                Aktif Oyuncuları Masaya Davet Et
+              </div>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                {activeLobbyPlayers.map((u) => {
+                  const invState = bluffInvitedIds[u.id];
+                  const busy = u.status === "in_game";
+                  return (
+                    <div
+                      key={u.id}
+                      className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs"
+                    >
+                      <span className="font-semibold text-white">{u.name}</span>
+                      <button
+                        disabled={busy || invState === "pending" || invState === "accepted"}
+                        onClick={() => sendBluffInviteToUser(u)}
+                        className={`px-2.5 py-1 rounded-lg font-bold text-[11px] ${
+                          invState === "accepted"
+                            ? "bg-emerald-600/30 text-emerald-300"
+                            : invState === "pending"
+                            ? "bg-amber-500/20 text-amber-300"
+                            : busy
+                            ? "bg-slate-800 text-slate-500"
+                            : "bg-indigo-600 hover:bg-indigo-500 text-white"
+                        }`}
+                      >
+                        {invState === "accepted"
+                          ? "Katıldı"
+                          : invState === "pending"
+                          ? "Davet Edildi"
+                          : busy
+                          ? "Oyunda"
+                          : "Davet Et"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <button
+              onClick={handleStartBluffFromTable}
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-extrabold text-xs text-white shadow-lg"
+            >
+              Blöf Oyununu Başlat ({Math.max(3, 1 + bluffJoinedMembers.length)} Kişi)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {selectedTargetUser && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-extrabold text-white">{selectedTargetUser.name}</h3>
+                <p className="text-xs text-slate-400">Oyun daveti göndermek için oyun seç</p>
+              </div>
+              <button
+                onClick={() => setSelectedTargetUser(null)}
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {GAMES_META.map((g) => {
+                const active = selectedGameForInvite === g.id;
+                return (
+                  <button
+                    key={g.id}
+                    onClick={() => setSelectedGameForInvite(g.id)}
+                    className={`p-2.5 rounded-xl border text-left text-xs font-bold transition ${
+                      active
+                        ? "bg-indigo-600/25 border-indigo-400 text-white"
+                        : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
+                    }`}
+                  >
+                    <div>{g.name}</div>
+                    <div className="text-[10px] font-normal text-slate-400">{g.badge}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                onClick={() => {
+                  const peer = selectedTargetUser;
+                  setSelectedTargetUser(null);
+                  openDirectMessage(peer);
+                }}
+                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-xs text-slate-200"
+              >
+                Özel Mesaj
+              </button>
+              <button
+                onClick={() => sendGameInvite(selectedTargetUser, selectedGameForInvite)}
+                className="py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-xs text-white"
+              >
+                Davet Gönder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reportTargetUser && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSubmitReport}
+            className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-extrabold text-white">
+                {reportTargetUser.name} Kullanıcısını Şikayet Et
+              </h3>
               <button
                 type="button"
                 onClick={() => setReportTargetUser(null)}
@@ -4729,110 +5594,73 @@ export default function App() {
               </button>
             </div>
 
-            <input
-              type="text"
-              value={reportReason}
-              onChange={(e) => setReportReason(e.target.value)}
-              placeholder="Şikayet sebebi (örn: küfür / uygunsuz mesaj)..."
-              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-amber-500"
-            />
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-400">Şikayet Sebebi</label>
+              <input
+                type="text"
+                maxLength={120}
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+                placeholder="Örn: Uygunsuz sohbet mesajı"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
 
-            <button
-              type="submit"
-              className="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-500 font-bold text-sm text-white"
-            >
-              Şikayeti Gönder
-            </button>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setReportTargetUser(null)}
+                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300"
+              >
+                İptal
+              </button>
+              <button
+                type="submit"
+                className="py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-extrabold text-slate-950"
+              >
+                Şikayeti Gönder
+              </button>
+            </div>
           </form>
         </div>
       )}
 
-      {selectedTargetUser && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-extrabold text-white">{selectedTargetUser.name} kişisine davet gönder</h3>
-                <p className="text-xs text-slate-400">Oynamak istediğiniz oyunu seçin</p>
-              </div>
-              <button onClick={() => setSelectedTargetUser(null)} className="p-1.5 rounded-xl bg-slate-800 text-slate-300">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {GAMES_META.map((g) => {
-                const IconComp = g.icon;
-                const active = selectedGameForInvite === g.id;
-                return (
-                  <button
-                    key={g.id}
-                    onClick={() => setSelectedGameForInvite(g.id)}
-                    className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between transition ${
-                      active
-                        ? "bg-indigo-600/20 border-indigo-500 text-white"
-                        : "bg-slate-950/70 border-slate-800 text-slate-300"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <IconComp className="w-5 h-5 text-indigo-400" />
-                      <div>
-                        <div className="text-sm font-bold">{g.name}</div>
-                        <div className="text-xs text-slate-400">{g.desc}</div>
-                      </div>
-                    </div>
-                    {active && <Check className="w-4 h-4 text-indigo-400" />}
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              onClick={() => sendGameInvite(selectedTargetUser, selectedGameForInvite)}
-              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-sm text-white"
-            >
-              {selectedGameForInvite === "bluff" ? "Blöf Masasını Aç & Davet Et" : "Daveti Gönder"}
-            </button>
-          </div>
-        </div>
-      )}
-
       {dmTarget && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-4 space-y-3 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
               <div>
                 <h3 className="text-sm font-extrabold text-white">{dmTarget.name}</h3>
-                <p className="text-[11px] text-emerald-400">Özel Sohbet • 1 saatte silinir</p>
+                <p className="text-[11px] text-slate-400">Özel Sohbet • 1 saat sonra silinir</p>
               </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => {
-                    const target = dmTarget;
-                    setDmTarget(null);
-                    setSelectedTargetUser(target);
-                  }}
-                  className="px-2.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs font-bold"
-                >
-                  Oyun Daveti
-                </button>
-                <button onClick={() => setDmTarget(null)} className="p-1.5 rounded-xl bg-slate-800 text-slate-300">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+              <button
+                onClick={() => setDmTarget(null)}
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            <div className="h-52 overflow-y-auto space-y-2 p-2 bg-slate-950/70 rounded-2xl border border-slate-800">
+            <div className="h-60 overflow-y-auto space-y-2 pr-1">
               {activeDmList.length === 0 ? (
-                <p className="text-center text-xs text-slate-500 pt-16">
-                  {dmTarget.name} ile ilk mesajı sen gönder.
-                </p>
+                <div className="text-xs text-slate-500 text-center py-10">
+                  Henüz mesaj yok. İlk mesajı sen gönder!
+                </div>
               ) : (
                 activeDmList.map((m) => {
                   const mine = m.senderId === myId;
                   return (
-                    <div key={m.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
-                      <div className={`px-3 py-1.5 rounded-2xl text-xs max-w-[80%] ${mine ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-100"}`}>
+                    <div
+                      key={m.id}
+                      className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
+                    >
+                      <div
+                        className={`px-3 py-2 rounded-2xl text-xs max-w-[82%] ${
+                          mine
+                            ? "bg-indigo-600 text-white rounded-br-sm"
+                            : "bg-slate-800 text-slate-100 rounded-bl-sm"
+                        }`}
+                      >
                         {m.text}
                       </div>
                     </div>
@@ -4841,15 +5669,18 @@ export default function App() {
               )}
             </div>
 
-            <form onSubmit={handleSendDirectMessage} className="flex gap-2">
+            <form onSubmit={handleSendDirectMessage} className="flex items-center gap-2">
               <input
                 type="text"
                 value={dmInput}
                 onChange={(e) => setDmInput(e.target.value)}
-                placeholder={`${dmTarget.name} kişisine yaz...`}
-                className="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
+                placeholder={`${dmTarget.name} kişisine mesaj yaz...`}
+                className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
               />
-              <button type="submit" className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white">
+              <button
+                type="submit"
+                className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
+              >
                 <Send className="w-4 h-4" />
               </button>
             </form>
