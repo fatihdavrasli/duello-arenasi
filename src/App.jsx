@@ -12,22 +12,14 @@ import {
 } from "firebase/database";
 import {
   Users,
-  Swords,
   MessageCircle,
   Send,
   X,
   Check,
-  Bot,
-  Trophy,
   RotateCcw,
   LogOut,
   Gamepad2,
   Sparkles,
-  CircleDot,
-  Grid,
-  Ship,
-  Hash,
-  Type,
   ChevronDown,
   ChevronUp,
   Bell,
@@ -37,16 +29,9 @@ import {
   Ban,
   Flag,
   Lock,
-  EyeOff,
-  Eye,
-  HelpCircle,
-  UserPlus,
   Play,
-  CornerUpLeft,
-  Shuffle,
   Undo2,
   SkipForward,
-  Layers,
 } from "lucide-react";
 
 const FIREBASE_CONFIG =
@@ -56,23 +41,18 @@ const FIREBASE_CONFIG =
 
 const MESSAGE_TTL_MS = 60 * 60 * 1000; // 1 saat
 
-const GAMES_META = [
-  { id: "bluff", name: "Blöf", desc: "3+ kişilik kelime & blöf oyunu", badge: "3+ Kişi", icon: EyeOff },
-  { id: "battleship", name: "Amiral Battı", desc: "6x6 hızlı deniz savaşı", badge: "Strateji", icon: Ship },
-  { id: "rps", name: "Taş Kağıt Makas", desc: "5 turluk düello", badge: "5 Tur", icon: Swords },
-  { id: "ttt", name: "Tic Tac Toe", desc: "3x3 sıra tabanlı XOX", badge: "Klasik", icon: Hash },
-  { id: "wordle", name: "Kelime Bulma", desc: "5 harfli Türkçe kelime yarışı", badge: "Kelime", icon: Type },
-  { id: "sudoku", name: "Sudoku", desc: "4x4 mini sudoku hız yarışı", badge: "Zeka", icon: Grid },
-  { id: "kelimelik", name: "Kelimelik", desc: "7x7 tahtada kelime kur & puan topla", badge: "Yeni", icon: Layers },
+const PRACTICE_GAMES_META = [
+  { id: "bluff", name: "Blöf", badge: "3+ Kişi" },
+  { id: "battleship", name: "Amiral Battı", badge: "Strateji" },
+  { id: "rps", name: "Taş Kağıt Makas", badge: "5 Tur" },
+  { id: "ttt", name: "Tic Tac Toe", badge: "Klasik" },
+  { id: "wordle", name: "Kelime Bulma", badge: "Kelime" },
+  { id: "sudoku", name: "Sudoku", badge: "Zeka" },
 ];
 
-const RANDOM_DUEL_GAME_IDS = [
-  "kelimelik",
-  "battleship",
-  "rps",
-  "ttt",
-  "wordle",
-  "sudoku",
+const ALL_GAMES_LOOKUP = [
+  ...PRACTICE_GAMES_META,
+  { id: "kelimelik", name: "Kelimelik", badge: "Kelime" },
 ];
 
 const LOBBY_BOT_PLAYERS = [
@@ -1014,8 +994,6 @@ export default function App() {
   const [rpsOppScore, setRpsOppScore] = useState(0);
   const [rpsMyPick, setRpsMyPick] = useState(null);
   const [rpsOppPick, setRpsOppPick] = useState(null);
-  const [rpsLastShownMyPick, setRpsLastShownMyPick] = useState(null);
-  const [rpsLastShownOppPick, setRpsLastShownOppPick] = useState(null);
   const [rpsPhase, setRpsPhase] = useState("picking");
   const [rpsRoundText, setRpsRoundText] = useState(`1/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
   const [rpsMatchWinner, setRpsMatchWinner] = useState(null);
@@ -1887,7 +1865,6 @@ export default function App() {
             const newEntry = {
               round: roundNum,
               resultForP1: winSide === "p1" ? "win" : winSide === "p2" ? "lose" : "draw",
-              label: `${getRPSEmoji(gs.p1Pick)} vs ${getRPSEmoji(gs.p2Pick)}`,
             };
             const nextHistory = [
               ...(Array.isArray(gs.history) ? gs.history.filter((h) => h.round !== roundNum) : []),
@@ -1926,7 +1903,7 @@ export default function App() {
                   winner: finalSide,
                   roundText: finalText,
                 });
-              }, 2200);
+              }, 2000);
             } else {
               const nextRoundNum = roundNum + 1;
               rpsTimerRef.current = setTimeout(() => {
@@ -1940,22 +1917,17 @@ export default function App() {
                   history: nextHistory,
                   roundText: `${nextRoundNum}/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`,
                 });
-              }, 2600);
+              }, 2200);
             }
+          } else if (gs.phase === "revealing") {
+            setRpsPhase("revealing");
+            if (gs.roundText) setRpsRoundText(gs.roundText);
+          } else if (myPickRemote && !oppPickRemote) {
+            setRpsPhase("picking");
+            setRpsRoundText(`${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: Seçimin alındı, rakip bekleniyor...`);
           } else {
-            if (myPickRemote) setRpsLastShownMyPick(myPickRemote);
-            if (oppPickRemote) setRpsLastShownOppPick(oppPickRemote);
-
-            if (gs.phase === "revealing") {
-              setRpsPhase("revealing");
-              if (gs.roundText) setRpsRoundText(gs.roundText);
-            } else if (myPickRemote && !oppPickRemote) {
-              setRpsPhase("picking");
-              setRpsRoundText(`${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: Seçimin alındı, rakip bekleniyor...`);
-            } else {
-              setRpsPhase("picking");
-              setRpsRoundText(gs.roundText || `${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
-            }
+            setRpsPhase("picking");
+            setRpsRoundText(gs.roundText || `${roundNum}/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
           }
         }
       }
@@ -2496,7 +2468,7 @@ export default function App() {
       },
     ]);
     setMatchUnread(0);
-    setMatchDrawerOpen(true);
+    setMatchDrawerOpen(false);
     setFloatingReaction(null);
 
     setActiveMatch({
@@ -2578,8 +2550,6 @@ export default function App() {
     setRpsOppScore(0);
     setRpsMyPick(null);
     setRpsOppPick(null);
-    setRpsLastShownMyPick(null);
-    setRpsLastShownOppPick(null);
     setRpsPhase("picking");
     setRpsRoundText(`1/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
     setRpsMatchWinner(null);
@@ -2656,7 +2626,7 @@ export default function App() {
         id: "m_" + Date.now(),
         senderId: "sys",
         senderName: "Sistem",
-        text: `${GAMES_META.find((g) => g.id === gameType)?.name || "Oyun"} maçı başladı! Başarılar.`,
+        text: `${ALL_GAMES_LOOKUP.find((g) => g.id === gameType)?.name || "Oyun"} maçı başladı! Başarılar.`,
         ts: Date.now(),
       },
     ]);
@@ -2755,43 +2725,14 @@ export default function App() {
     }
   }
 
-  function handleRandomMatch() {
-    const chosenGame =
-      RANDOM_DUEL_GAME_IDS[Math.floor(Math.random() * RANDOM_DUEL_GAME_IDS.length)];
-    const availableHumans = users.filter(
-      (u) =>
-        u &&
-        u.id &&
-        u.id !== myId &&
-        !u.isBot &&
-        !LOBBY_BOT_ID_SET.has(u.id) &&
-        (u.status || "online") === "online"
-    );
-
-    if (availableHumans.length > 0 && dbRef.current) {
-      const pickedHuman =
-        availableHumans[Math.floor(Math.random() * availableHumans.length)];
-      const gameMeta = GAMES_META.find((g) => g.id === chosenGame) || GAMES_META[0];
-      acceptedHandledRef.current = false;
-      const invitePayload = {
-        fromId: myId,
-        fromName: nickname.trim(),
-        toId: pickedHuman.id,
-        toName: pickedHuman.name,
-        gameId: gameMeta.id,
-        gameName: gameMeta.name,
-        openChat: true,
-        status: "pending",
-        ts: Date.now(),
-      };
-      set(ref(dbRef.current, `invites/${pickedHuman.id}`), invitePayload);
-      setOutgoingInvite(invitePayload);
+  function handleStartPracticeGame(gameId) {
+    if (gameId === "bluff") {
+      openBluffTable(null);
       return;
     }
-
     const pickedBot =
       LOBBY_BOT_PLAYERS[Math.floor(Math.random() * LOBBY_BOT_PLAYERS.length)];
-    startMatch(pickedBot, chosenGame, true, null, true, true);
+    startMatch(pickedBot, gameId, true, null, true, false);
   }
 
   function sendGameInvite(targetUser, gameId) {
@@ -2806,7 +2747,7 @@ export default function App() {
     }
 
     acceptedHandledRef.current = false;
-    const gameMeta = GAMES_META.find((g) => g.id === gameId) || GAMES_META[0];
+    const gameMeta = ALL_GAMES_LOOKUP.find((g) => g.id === gameId) || ALL_GAMES_LOOKUP[0];
     const invitePayload = {
       fromId: myId,
       fromName: nickname.trim(),
@@ -3368,8 +3309,6 @@ export default function App() {
   function handleRPSPick(choice) {
     if (rpsPhase !== "picking" || rpsMatchWinner || rpsMyPick) return;
 
-    setRpsLastShownMyPick(choice);
-
     if (activeMatch && !activeMatch.isBot && dbRef.current) {
       setRpsMyPick(choice);
       setRpsRoundText(`${rpsRound}/${RPS_TOTAL_ROUNDS}. Tur: Seçimin alındı, rakip bekleniyor...`);
@@ -3386,7 +3325,6 @@ export default function App() {
 
     setRpsMyPick(choice);
     setRpsOppPick(oppChoice);
-    setRpsLastShownOppPick(oppChoice);
     setRpsPhase("revealing");
 
     const winSide = evaluateRPSRound(choice, oppChoice);
@@ -3410,7 +3348,6 @@ export default function App() {
       {
         round: currentRoundNum,
         resultForP1: roundOutcome,
-        label: `${getRPSEmoji(choice)} vs ${getRPSEmoji(oppChoice)}`,
       },
     ].sort((a, b) => a.round - b.round);
     setRpsHistory(nextHistory);
@@ -3431,7 +3368,7 @@ export default function App() {
             ? `${RPS_TOTAL_ROUNDS} tur sonunda ${nextMyScore}-${nextOppScore} ile rakip kazandı!`
             : `${RPS_TOTAL_ROUNDS} tur sonunda ${nextMyScore}-${nextOppScore} berabere!`
         );
-      }, 2200);
+      }, 1800);
     } else {
       const upcomingRound = currentRoundNum + 1;
       rpsTimerRef.current = setTimeout(() => {
@@ -3440,7 +3377,7 @@ export default function App() {
         setRpsOppPick(null);
         setRpsPhase("picking");
         setRpsRoundText(`${upcomingRound}/${RPS_TOTAL_ROUNDS}. Tur: Seçimini yap!`);
-      }, 2600);
+      }, 2000);
     }
   }
 
@@ -3786,7 +3723,7 @@ export default function App() {
             </div>
             <h1 className="text-3xl font-extrabold tracking-tight text-white">Düello Arenası</h1>
             <p className="text-sm text-slate-400">
-              Aktif oyuncularla eşleş, sohbet et ve 7 farklı oyunda yarış.
+              Aktif oyuncularla eşleş, sohbet et ve botlarla pratik yap.
             </p>
           </div>
 
@@ -3862,15 +3799,15 @@ export default function App() {
 
           <div className="grid grid-cols-3 gap-2 text-center text-xs text-slate-400">
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
-              <div className="font-semibold text-slate-200">7 Oyun</div>
-              <div>Kelimelik, Blöf...</div>
+              <div className="font-semibold text-slate-200">Pratik Modu</div>
+              <div>Botla anında başla</div>
             </div>
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
               <div className="font-semibold text-slate-200">1 Saatlik Sohbet</div>
               <div>Otomatik temizlenir</div>
             </div>
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5">
-              <div className="font-semibold text-slate-200">İlk 5 Listeler</div>
+              <div className="font-semibold text-slate-200">Kayar Listeler</div>
               <div>Puan & Son Online</div>
             </div>
           </div>
@@ -3886,9 +3823,7 @@ export default function App() {
   }
 
   if (activeMatch) {
-    const gameInfo = GAMES_META.find((g) => g.id === activeMatch.gameType) || GAMES_META[0];
-    const shownMyPick = rpsMyPick || rpsLastShownMyPick;
-    const shownOppPick = rpsOppPick || rpsLastShownOppPick;
+    const gameInfo = ALL_GAMES_LOOKUP.find((g) => g.id === activeMatch.gameType) || ALL_GAMES_LOOKUP[0];
     const totalShipCells = countShipCells(enemyGridForBot);
     const myHitCells = countHitsOnGrid(myShotsOnEnemy);
 
@@ -3917,9 +3852,14 @@ export default function App() {
         <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-400">
                 {gameInfo.name}
               </span>
+              {activeMatch.isBot && (
+                <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 text-[11px] font-bold">
+                  Bot
+                </span>
+              )}
             </div>
             <p className="text-sm font-semibold text-white">
               {activeMatch.gameType === "bluff"
@@ -4126,9 +4066,8 @@ export default function App() {
                   </button>
                   <button
                     onClick={handleKlShuffleRack}
-                    className="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200 flex items-center justify-center gap-1"
+                    className="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200"
                   >
-                    <Shuffle className="w-3.5 h-3.5" />
                     Karıştır
                   </button>
                   <button
@@ -4496,117 +4435,116 @@ export default function App() {
             </div>
           )}
 
+          {/* SADE TAŞ KAĞIT MAKAS EKRANI (1000426916.jpg DÜZENİ) */}
           {activeMatch.gameType === "rps" && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4 text-center">
-              <div className="flex items-center justify-around bg-slate-950/80 border border-slate-800 rounded-2xl py-3 px-2">
-                <div>
-                  <div className="text-[11px] text-slate-400">Sen</div>
-                  <div className="text-2xl font-extrabold text-indigo-400">{rpsMyScore}</div>
-                </div>
-                <div className="text-xs font-bold px-3 py-1 rounded-full bg-slate-800 text-slate-300">
-                  TUR {rpsRound}/{RPS_TOTAL_ROUNDS}
-                </div>
-                <div>
-                  <div className="text-[11px] text-slate-400">{activeMatch.opponent.name}</div>
-                  <div className="text-2xl font-extrabold text-rose-400">{rpsOppScore}</div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3 space-y-1">
-                  <div className="text-[11px] text-slate-400">Senin Seçimin</div>
-                  <div className="text-3xl h-10 flex items-center justify-center">
-                    {rpsPhase === "picking" && !rpsMyPick ? "🤔" : getRPSEmoji(shownMyPick)}
+            <div className="space-y-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+                <div className="flex items-center justify-between px-2">
+                  <div className="text-left">
+                    <div className="text-xs text-slate-400">Sen</div>
+                    <div className="text-3xl font-extrabold text-indigo-400 mt-0.5">{rpsMyScore}</div>
                   </div>
-                  <div className="text-xs font-semibold text-slate-200">
-                    {rpsPhase === "picking" && !rpsMyPick ? "Seçim bekleniyor" : getRPSLabel(shownMyPick)}
+
+                  <span className="px-3.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-extrabold text-slate-200">
+                    TUR {rpsRound}/{RPS_TOTAL_ROUNDS}
+                  </span>
+
+                  <div className="text-right">
+                    <div className="text-xs text-slate-400 truncate max-w-[110px]">
+                      {activeMatch.opponent.name}
+                    </div>
+                    <div className="text-3xl font-extrabold text-rose-400 mt-0.5">{rpsOppScore}</div>
                   </div>
                 </div>
 
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3 space-y-1">
-                  <div className="text-[11px] text-slate-400">{activeMatch.opponent.name}</div>
-                  <div className="text-3xl h-10 flex items-center justify-center">
-                    {rpsPhase === "picking" ? "❓" : getRPSEmoji(shownOppPick)}
-                  </div>
-                  <div className="text-xs font-semibold text-slate-200">
-                    {rpsPhase === "picking"
-                      ? rpsMyPick
-                        ? "Seçimini yaptı / bekleniyor"
-                        : "Kapalı"
-                      : getRPSLabel(shownOppPick)}
-                  </div>
-                </div>
-              </div>
+                <div className="grid grid-cols-5 gap-2">
+                  {Array.from({ length: RPS_TOTAL_ROUNDS }).map((_, idx) => {
+                    const roundNum = idx + 1;
+                    const hist = rpsHistory.find((h) => h.round === roundNum);
+                    const isCurrent = !rpsMatchWinner && rpsRound === roundNum;
 
-              <p className="text-sm font-bold text-amber-300 min-h-[2.5rem] flex items-center justify-center">
-                {rpsRoundText}
-              </p>
+                    let boxCls = "bg-slate-950 border-slate-800 text-slate-400";
+                    let mark = "-";
 
-              {rpsHistory.length > 0 && (
-                <div className="flex flex-wrap items-center justify-center gap-1.5">
-                  {rpsHistory.map((h) => (
-                    <span
-                      key={h.round}
-                      className={`text-[11px] px-2.5 py-1 rounded-full border font-semibold ${
-                        h.resultForP1 === "win"
-                          ? "bg-emerald-950/70 border-emerald-500/40 text-emerald-300"
-                          : h.resultForP1 === "lose"
-                          ? "bg-rose-950/70 border-rose-500/40 text-rose-300"
-                          : "bg-slate-800 border-slate-700 text-slate-300"
-                      }`}
-                    >
-                      T{h.round}: {h.label}
-                    </span>
-                  ))}
-                </div>
-              )}
+                    if (hist?.resultForP1 === "win") {
+                      boxCls = "bg-emerald-950/70 border-emerald-500/50 text-emerald-300";
+                      mark = "✓";
+                    } else if (hist?.resultForP1 === "lose") {
+                      boxCls = "bg-rose-950/70 border-rose-500/50 text-rose-300";
+                      mark = "✕";
+                    } else if (hist?.resultForP1 === "draw") {
+                      boxCls = "bg-slate-800 border-slate-600 text-slate-300";
+                      mark = "=";
+                    } else if (isCurrent) {
+                      boxCls = "bg-indigo-950/60 border-indigo-400 text-white";
+                      mark = "•";
+                    }
 
-              {!rpsMatchWinner ? (
-                <div className="grid grid-cols-3 gap-2.5 pt-1">
-                  {RPS_CHOICES.map((ch) => {
-                    const isSelectedThisRound = rpsMyPick === ch.id;
                     return (
-                      <button
-                        key={ch.id}
-                        disabled={rpsPhase !== "picking" || Boolean(rpsMyPick)}
-                        onClick={() => handleRPSPick(ch.id)}
-                        className={`py-3.5 rounded-2xl border disabled:opacity-50 active:scale-95 transition flex flex-col items-center gap-1 ${
-                          isSelectedThisRound
-                            ? "bg-indigo-600/30 border-indigo-400 ring-2 ring-indigo-400/40"
-                            : "bg-slate-800 hover:bg-slate-700 border-slate-700"
-                        }`}
+                      <div
+                        key={roundNum}
+                        className={`rounded-xl border py-2 text-center transition ${boxCls}`}
                       >
-                        <span className="text-2xl">{ch.emoji}</span>
-                        <span className="text-xs font-bold">{ch.label}</span>
-                      </button>
+                        <div className="text-[11px] font-bold">T{roundNum}</div>
+                        <div className="text-xs font-extrabold mt-0.5">{mark}</div>
+                      </div>
                     );
                   })}
                 </div>
-              ) : (
-                <div className="space-y-2.5 pt-1">
-                  <div
-                    className={`text-base font-extrabold ${
-                      rpsMatchWinner === "me"
-                        ? "text-emerald-400"
-                        : rpsMatchWinner === "draw"
-                        ? "text-amber-300"
-                        : "text-rose-400"
-                    }`}
-                  >
-                    {rpsMatchWinner === "me"
-                      ? `SERİYİ KAZANDIN! (${rpsMyScore}-${rpsOppScore}) (+1 Puan)`
-                      : rpsMatchWinner === "draw"
-                      ? `SERİ BERABERE! (${rpsMyScore}-${rpsOppScore})`
-                      : `SERİYİ KAYBETTİN! (${rpsMyScore}-${rpsOppScore})`}
+
+                <p className="text-center text-sm font-semibold text-white min-h-[1.5rem]">
+                  {rpsRoundText}
+                </p>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5">
+                {!rpsMatchWinner ? (
+                  <div className="grid grid-cols-3 gap-2.5">
+                    {RPS_CHOICES.map((ch) => {
+                      const isSelectedThisRound = rpsMyPick === ch.id;
+                      return (
+                        <button
+                          key={ch.id}
+                          disabled={rpsPhase !== "picking" || Boolean(rpsMyPick)}
+                          onClick={() => handleRPSPick(ch.id)}
+                          className={`py-5 px-2 rounded-2xl border disabled:opacity-50 active:scale-[0.98] transition flex flex-col items-center justify-center gap-2.5 ${
+                            isSelectedThisRound
+                              ? "bg-indigo-600/30 border-indigo-400 text-white"
+                              : "bg-slate-950 hover:bg-slate-800 border-slate-800 text-white"
+                          }`}
+                        >
+                          <span className="text-3xl leading-none">{ch.emoji}</span>
+                          <span className="text-sm font-semibold">{ch.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
-                  <button
-                    onClick={() => handleRequestNewMatch("rps")}
-                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
-                  >
-                    {activeMatch.isBot ? "Yeni 5 Turluk Seri" : "Yeni Seri Daveti Gönder"}
-                  </button>
-                </div>
-              )}
+                ) : (
+                  <div className="text-center space-y-3 py-1">
+                    <div
+                      className={`text-base font-extrabold ${
+                        rpsMatchWinner === "me"
+                          ? "text-emerald-400"
+                          : rpsMatchWinner === "draw"
+                          ? "text-amber-300"
+                          : "text-rose-400"
+                      }`}
+                    >
+                      {rpsMatchWinner === "me"
+                        ? `SERİYİ KAZANDIN! (${rpsMyScore}-${rpsOppScore}) (+1 Puan)`
+                        : rpsMatchWinner === "draw"
+                        ? `SERİ BERABERE! (${rpsMyScore}-${rpsOppScore})`
+                        : `SERİYİ KAYBETTİN! (${rpsMyScore}-${rpsOppScore})`}
+                    </div>
+                    <button
+                      onClick={() => handleRequestNewMatch("rps")}
+                      className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-extrabold text-white"
+                    >
+                      {activeMatch.isBot ? "Yeni 5 Turluk Seri" : "Yeni Seri Daveti Gönder"}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -4994,7 +4932,7 @@ export default function App() {
         </button>
       </header>
 
-      <main className="max-w-md mx-auto p-4 space-y-5">
+      <main className="max-w-md mx-auto p-4 space-y-4">
         {noticeBanner && (
           <div className="bg-indigo-950/70 border border-indigo-500/40 rounded-2xl p-3.5 flex items-start justify-between gap-3">
             <div className="space-y-0.5">
@@ -5015,7 +4953,7 @@ export default function App() {
             <div className="space-y-0.5">
               <div className="text-xs font-extrabold text-amber-300">Yarım Kalan Maçın Var</div>
               <p className="text-xs text-slate-200">
-                {GAMES_META.find((g) => g.id === resumableMatch.gameType)?.name || "Oyun"} •{" "}
+                {ALL_GAMES_LOOKUP.find((g) => g.id === resumableMatch.gameType)?.name || "Oyun"} •{" "}
                 {resumableMatch.opponent?.name || "Rakip"}
               </p>
             </div>
@@ -5141,60 +5079,32 @@ export default function App() {
           </div>
         )}
 
-        <section className="space-y-2.5">
+        {/* PRATİK YAP (BOTLA OYNA) - 1000427051.jpg SADE DÜZEN */}
+        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-slate-300 flex items-center gap-1.5">
-              <Swords className="w-4 h-4 text-indigo-400" />
-              Hızlı Eşleş veya Oyun Seç
+            <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
+              <Gamepad2 className="w-4 h-4 text-indigo-400" />
+              Pratik Yap (Botla Oyna)
             </h2>
-            <span className="text-[11px] text-slate-500">Bot veya Canlı</span>
+            <span className="text-xs text-slate-400">Anında Başla</span>
           </div>
 
-          <button
-            onClick={handleRandomMatch}
-            className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 active:scale-[0.99] transition shadow-lg shadow-indigo-600/25 flex items-center justify-between text-white"
-          >
-            <span className="flex items-center gap-2.5 text-sm font-extrabold">
-              <Shuffle className="w-4 h-4" />
-              Rastgele Eşleş
-            </span>
-            <span className="text-[11px] font-semibold bg-white/15 px-2.5 py-0.5 rounded-full">
-              Oyun + Sohbet
-            </span>
-          </button>
-
           <div className="grid grid-cols-2 gap-2.5">
-            {GAMES_META.map((g) => {
-              const IconComp = g.icon;
-              return (
-                <button
-                  key={g.id}
-                  onClick={() => {
-                    if (g.id === "bluff") {
-                      openBluffTable(null);
-                    } else {
-                      const pickedBot =
-                        LOBBY_BOT_PLAYERS[Math.floor(Math.random() * LOBBY_BOT_PLAYERS.length)];
-                      startMatch(pickedBot, g.id, true, null, true, false);
-                    }
-                  }}
-                  className="bg-slate-900 hover:bg-slate-800/90 border border-slate-800 hover:border-indigo-500/40 rounded-2xl p-3.5 text-left transition active:scale-[0.98] space-y-1.5"
-                >
-                  <div className="flex items-center justify-between">
-                    <IconComp className="w-4 h-4 text-indigo-400" />
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                      {g.badge}
-                    </span>
-                  </div>
-                  <div className="font-bold text-sm text-white">{g.name}</div>
-                  <div className="text-[11px] text-slate-400 leading-snug">{g.desc}</div>
-                </button>
-              );
-            })}
+            {PRACTICE_GAMES_META.map((g) => (
+              <button
+                key={g.id}
+                onClick={() => handleStartPracticeGame(g.id)}
+                className="bg-slate-950/85 hover:bg-slate-800/90 border border-slate-800 hover:border-indigo-500/40 rounded-xl px-3.5 py-3 text-left transition active:scale-[0.98]"
+              >
+                <div className="font-bold text-sm text-white truncate">{g.name}</div>
+                <div className="text-xs text-slate-400 mt-0.5">{g.badge}</div>
+              </button>
+            ))}
           </div>
         </section>
 
-        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
+        {/* AKTİF OYUNCULAR */}
+        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
               <Users className="w-4 h-4 text-emerald-400" />
@@ -5288,22 +5198,22 @@ export default function App() {
           </div>
         </section>
 
-        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-amber-400" />
+        {/* EN ÇOK KAZANANLAR (İLK 5) - SOLDAN SAĞA KAYAR ŞERİT */}
+        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-xs font-extrabold text-white">
               En Çok Kazananlar (İlk 5)
             </h2>
             <span className="text-[11px] text-slate-400">Online olmasalar bile görünür</span>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="flex gap-2 overflow-x-auto pb-0.5 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {topFiveWinners.map((player, idx) => (
               <div
                 key={player.id}
-                className="flex items-center justify-between bg-slate-950/75 border border-slate-800/80 rounded-xl px-3 py-2 text-xs"
+                className="min-w-[144px] snap-start shrink-0 bg-slate-950/80 border border-slate-800/90 rounded-xl px-3 py-2 flex flex-col justify-between gap-1.5"
               >
-                <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex items-center justify-between gap-2">
                   <span
                     className={`w-5 h-5 rounded-full flex items-center justify-center font-extrabold text-[11px] ${
                       idx === 0
@@ -5317,60 +5227,64 @@ export default function App() {
                   >
                     {idx + 1}
                   </span>
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      player.isOnline ? "bg-emerald-400" : "bg-slate-600"
-                    }`}
-                  />
-                  <span className="font-semibold text-white truncate">
-                    {player.name} {player.isMe ? "(Sen)" : ""}
-                  </span>
-                  <span className="text-[10px] text-slate-400">
-                    {player.isOnline ? "Online" : "Çevrimdışı"}
+                  <span className="text-xs font-extrabold text-amber-300 shrink-0">
+                    {player.wins} Puan
                   </span>
                 </div>
-                <span className="font-extrabold text-amber-300 shrink-0">{player.wins} Puan</span>
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-white truncate">
+                    {player.name} {player.isMe ? "(Sen)" : ""}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5">
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        player.isOnline ? "bg-emerald-400" : "bg-slate-600"
+                      }`}
+                    />
+                    <span>{player.isOnline ? "Online" : "Çevrimdışı"}</span>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
         </section>
 
-        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <Clock className="w-4 h-4 text-sky-400" />
+        {/* SON ONLINE OLANLAR (İLK 5) - SOLDAN SAĞA KAYAR ŞERİT */}
+        <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-xs font-extrabold text-white flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-sky-400" />
               Son Online Olanlar (İlk 5)
             </h2>
             <span className="text-[11px] text-slate-400">Güncel aktivite</span>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="flex gap-2 overflow-x-auto pb-0.5 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {lastFiveOnlinePlayers.map((player, idx) => (
               <div
                 key={`recent_${player.id}`}
-                className="flex items-center justify-between bg-slate-950/75 border border-slate-800/80 rounded-xl px-3 py-2 text-xs"
+                className="min-w-[138px] snap-start shrink-0 bg-slate-950/80 border border-slate-800/90 rounded-xl px-3 py-2"
               >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="text-[11px] font-bold text-slate-500 w-4">{idx + 1}.</span>
+                <div className="text-xs font-semibold text-white truncate">
+                  {idx + 1}. {player.name} {player.isMe ? "(Sen)" : ""}
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 mt-0.5">
                   <span
-                    className={`w-2 h-2 rounded-full ${
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                       player.isOnline ? "bg-emerald-400" : "bg-slate-600"
                     }`}
                   />
-                  <span className="font-semibold text-white truncate">
-                    {player.name} {player.isMe ? "(Sen)" : ""}
+                  <span className="truncate">
+                    {player.isOnline ? "Şu an online" : formatRelativeTime(player.lastSeenAt)}
                   </span>
                 </div>
-                <span className="text-[11px] text-slate-400 shrink-0">
-                  {player.isOnline ? "Şu an online" : formatRelativeTime(player.lastSeenAt)}
-                </span>
               </div>
             ))}
           </div>
         </section>
 
         {isFdAdmin && (
-          <section className="bg-amber-950/25 border border-amber-500/40 rounded-2xl p-4 space-y-3">
+          <section className="bg-amber-950/25 border border-amber-500/40 rounded-2xl p-3.5 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-extrabold text-amber-300 flex items-center gap-2">
                 <Shield className="w-4 h-4" />
@@ -5447,6 +5361,7 @@ export default function App() {
           </section>
         )}
 
+        {/* BÜYÜTÜLMÜŞ GENEL LOBİ SOHBETİ */}
         <section className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden">
           <button
             onClick={() => {
@@ -5469,7 +5384,7 @@ export default function App() {
 
           {globalChatOpen && (
             <div className="px-4 pb-4 space-y-3 border-t border-slate-800/80 pt-3">
-              <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+              <div className="max-h-80 min-h-[200px] overflow-y-auto space-y-2 pr-1">
                 {visibleGlobalMessages.map((m) => {
                   const mine = m.senderId === myId;
                   const canDelete = isFdAdmin && m.senderId !== "sys";
@@ -5511,11 +5426,11 @@ export default function App() {
                   value={globalInput}
                   onChange={(e) => setGlobalInput(e.target.value)}
                   placeholder="Lobiye mesaj yaz..."
-                  className="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
                 <button
                   type="submit"
-                  className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1"
+                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1"
                 >
                   <Send className="w-3.5 h-3.5" />
                   Gönder
@@ -5565,7 +5480,6 @@ export default function App() {
 
             <div className="space-y-2">
               <div className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                <UserPlus className="w-3.5 h-3.5 text-indigo-400" />
                 Aktif Oyuncuları Masaya Davet Et
               </div>
               <div className="space-y-1.5 max-h-40 overflow-y-auto">
@@ -5634,7 +5548,7 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              {GAMES_META.map((g) => {
+              {ALL_GAMES_LOOKUP.map((g) => {
                 const active = selectedGameForInvite === g.id;
                 return (
                   <button
@@ -5657,7 +5571,7 @@ export default function App() {
               onClick={() => sendGameInvite(selectedTargetUser, selectedGameForInvite)}
               className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-xs text-white"
             >
-              {selectedGameForInvite === "bluff" ? "Blöf Masası Kur & Davet Et" : "Davet Gönder"}
+              {selectedGameForInvite === "bluff" ? "Blöf Masası Aç ve Davet Et" : "Davet Gönder"}
             </button>
           </div>
         </div>
@@ -5670,16 +5584,16 @@ export default function App() {
             className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl"
           >
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Flag className="w-4 h-4 text-amber-400" />
+              <div>
                 <h3 className="text-base font-extrabold text-white">
-                  {reportTargetUser.name} Şikayet Et
+                  {reportTargetUser.name} Kullanıcısını Şikayet Et
                 </h3>
+                <p className="text-xs text-slate-400">Şikayet kaydı FD yönetimine gönderilir.</p>
               </div>
               <button
                 type="button"
                 onClick={() => setReportTargetUser(null)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -5687,29 +5601,39 @@ export default function App() {
 
             <textarea
               rows={3}
+              maxLength={180}
               value={reportReason}
               onChange={(e) => setReportReason(e.target.value)}
-              placeholder="Şikayet sebebini kısaca yaz..."
+              placeholder="Şikayet nedenini kısaça yazın..."
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
             />
 
-            <button
-              type="submit"
-              className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs"
-            >
-              Şikayeti Gönder
-            </button>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setReportTargetUser(null)}
+                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200"
+              >
+                İptal
+              </button>
+              <button
+                type="submit"
+                className="py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-xs font-bold text-white"
+              >
+                Şikayet Et
+              </button>
+            </div>
           </form>
         </div>
       )}
 
       {dmTarget && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-4 space-y-3 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl max-w-md w-full p-4 space-y-3 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
               <div>
                 <h3 className="text-sm font-extrabold text-white">{dmTarget.name}</h3>
-                <p className="text-[11px] text-slate-400">Özel Sohbet (1 saat sonra silinir)</p>
+                <p className="text-[11px] text-slate-400">Özel Mesaj • 1 saat sonra silinir</p>
               </div>
               <button
                 onClick={() => setDmTarget(null)}
@@ -5719,11 +5643,11 @@ export default function App() {
               </button>
             </div>
 
-            <div className="h-56 overflow-y-auto space-y-2 pr-1">
+            <div className="max-h-64 min-h-[140px] overflow-y-auto space-y-2 pr-1">
               {activeDmList.length === 0 ? (
-                <p className="text-xs text-center text-slate-500 pt-16">
+                <div className="text-xs text-slate-500 text-center py-8">
                   Henüz mesaj yok. İlk mesajı sen gönder!
-                </p>
+                </div>
               ) : (
                 activeDmList.map((m) => {
                   const mine = m.senderId === myId;
@@ -5732,8 +5656,11 @@ export default function App() {
                       key={m.id}
                       className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
                     >
+                      <span className="text-[10px] text-slate-500 px-1">
+                        {mine ? "Sen" : m.senderName}
+                      </span>
                       <div
-                        className={`px-3.5 py-2 rounded-2xl text-xs max-w-[82%] ${
+                        className={`px-3 py-2 rounded-2xl text-xs max-w-[82%] ${
                           mine
                             ? "bg-indigo-600 text-white rounded-br-sm"
                             : "bg-slate-800 text-slate-100 rounded-bl-sm"
@@ -5747,17 +5674,17 @@ export default function App() {
               )}
             </div>
 
-            <form onSubmit={handleSendDirectMessage} className="flex gap-2">
+            <form onSubmit={handleSendDirectMessage} className="flex items-center gap-2 pt-1">
               <input
                 type="text"
                 value={dmInput}
                 onChange={(e) => setDmInput(e.target.value)}
-                placeholder={`${dmTarget.name} kişisine yaz...`}
+                placeholder={`${dmTarget.name} kişisine mesaj yaz...`}
                 className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
               />
               <button
                 type="submit"
-                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
               >
                 <Send className="w-4 h-4" />
               </button>
