@@ -32,6 +32,7 @@ import {
   Play,
   Undo2,
   SkipForward,
+  Shuffle,
 } from "lucide-react";
 
 const FIREBASE_CONFIG =
@@ -48,11 +49,18 @@ const PRACTICE_GAMES_META = [
   { id: "ttt", name: "Tic Tac Toe", badge: "Klasik" },
   { id: "wordle", name: "Kelime Bulma", badge: "Kelime" },
   { id: "sudoku", name: "Sudoku", badge: "Zeka" },
+  { id: "kelimelik", name: "Kelimelik", badge: "Kelime" },
+  { id: "random_match", name: "Rastgele Eşleş", badge: "Hızlı Oyun" },
 ];
 
 const ALL_GAMES_LOOKUP = [
-  ...PRACTICE_GAMES_META,
   { id: "kelimelik", name: "Kelimelik", badge: "Kelime" },
+  { id: "bluff", name: "Blöf", badge: "3+ Kişi" },
+  { id: "battleship", name: "Amiral Battı", badge: "Strateji" },
+  { id: "rps", name: "Taş Kağıt Makas", badge: "5 Tur" },
+  { id: "ttt", name: "Tic Tac Toe", badge: "Klasik" },
+  { id: "wordle", name: "Kelime Bulma", badge: "Kelime" },
+  { id: "sudoku", name: "Sudoku", badge: "Zeka" },
 ];
 
 const LOBBY_BOT_PLAYERS = [
@@ -139,6 +147,72 @@ const KELIMELIK_BOT_WORDS = [
   "DALGA", "SAHİL", "LİMAN", "ORMAN", "TARLA", "RADYO", "MELEK", "GÜNEŞ",
   "KAVUN", "KEDİ", "ARABA", "KİTAP", "KALEM", "SAAT", "PASTA", "UÇAK",
 ];
+
+function AutoMarqueeRow({ children, speed = 0.55 }) {
+  const containerRef = useRef(null);
+  const pausedRef = useRef(false);
+  const resumeTimerRef = useRef(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    let rafId = null;
+    let exactPos = el.scrollLeft;
+
+    const tick = () => {
+      if (!pausedRef.current && el) {
+        const halfWidth = el.scrollWidth / 2;
+        if (halfWidth > el.clientWidth + 4) {
+          exactPos += speed;
+          if (exactPos >= halfWidth) {
+            exactPos -= halfWidth;
+          }
+          el.scrollLeft = exactPos;
+        } else {
+          exactPos = el.scrollLeft;
+        }
+      } else if (el) {
+        exactPos = el.scrollLeft;
+      }
+      rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    };
+  }, [speed, children]);
+
+  const pauseTemporarily = () => {
+    pausedRef.current = true;
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+  };
+
+  const scheduleResume = () => {
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    resumeTimerRef.current = setTimeout(() => {
+      pausedRef.current = false;
+    }, 1400);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      onTouchStart={pauseTemporarily}
+      onTouchEnd={scheduleResume}
+      onMouseEnter={pauseTemporarily}
+      onMouseLeave={scheduleResume}
+      className="flex gap-2 overflow-x-auto pb-0.5 touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    >
+      <div className="flex gap-2 shrink-0">{children}</div>
+      <div className="flex gap-2 shrink-0" aria-hidden="true">
+        {children}
+      </div>
+    </div>
+  );
+}
 
 function getLetterPoint(ch) {
   if (!ch) return 1;
@@ -934,12 +1008,30 @@ export default function App() {
   const [globalUnread, setGlobalUnread] = useState(0);
 
   const [dmTarget, setDmTarget] = useState(null);
-  const [dmMessagesByPeer, setDmMessagesByPeer] = useState({});
+  const [dmMessagesByPeer, setDmMessagesByPeer] = useState(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = window.localStorage.getItem("duello_dm_messages");
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return {};
+      const nowMs = Date.now();
+      const cleaned = {};
+      for (const [peerId, list] of Object.entries(parsed)) {
+        if (Array.isArray(list)) {
+          cleaned[peerId] = list.filter((m) => isWithinOneHour(m?.ts, nowMs));
+        }
+      }
+      return cleaned;
+    } catch {
+      return {};
+    }
+  });
   const [dmUnreadByPeer, setDmUnreadByPeer] = useState({});
   const [dmInput, setDmInput] = useState("");
   const [incomingDm, setIncomingDm] = useState(null);
 
-  const [matchDrawerOpen, setMatchDrawerOpen] = useState(false);
+  const [matchDrawerOpen, setMatchDrawerOpen] = useState(true);
   const [matchMessages, setMatchMessages] = useState([]);
   const [matchInput, setMatchInput] = useState("");
   const [matchUnread, setMatchUnread] = useState(0);
@@ -1031,6 +1123,38 @@ export default function App() {
   const isFdAdmin = enteredLobby && isReservedFdName(nickname) && isFdAuthenticated;
   const typingFdName = isReservedFdName(nickname);
   const isMyBanned = Boolean(bannedUsers && bannedUsers[myId]);
+
+  const appendDmMessage = useCallback((peerId, msg) => {
+    if (!peerId || !msg) return;
+    setDmMessagesByPeer((prev) => {
+      const existingList = Array.isArray(prev[peerId]) ? prev[peerId] : [];
+      if (msg.id && existingList.some((item) => item.id === msg.id)) {
+        return prev;
+      }
+      const nextList = [...existingList, msg].slice(-80);
+      const nextMap = {
+        ...prev,
+        [peerId]: nextList,
+      };
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem("duello_dm_messages", JSON.stringify(nextMap));
+        } catch {
+          // ignore storage quota errors
+        }
+      }
+      return nextMap;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("duello_dm_messages", JSON.stringify(dmMessagesByPeer));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [dmMessagesByPeer]);
 
   const upsertKnownPlayer = useCallback((playerRecord) => {
     if (!playerRecord || !playerRecord.id) return;
@@ -1439,10 +1563,22 @@ export default function App() {
 
         if (!initialized) {
           initialized = true;
-          setDmMessagesByPeer((prev) => ({
-            ...prev,
-            [peer.id]: arr.slice(-60),
-          }));
+          setDmMessagesByPeer((prev) => {
+            const localList = prev[peer.id] || [];
+            const mergedMap = new Map();
+            [...localList, ...arr.slice(-60)].forEach((item, i) => {
+              if (item && isWithinOneHour(item.ts, nowMs)) {
+                mergedMap.set(item.id || `${item.ts}_${i}`, item);
+              }
+            });
+            const merged = Array.from(mergedMap.values())
+              .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+              .slice(-80);
+            return {
+              ...prev,
+              [peer.id]: merged,
+            };
+          });
           return;
         }
 
@@ -1470,9 +1606,19 @@ export default function App() {
             }
           }
 
+          const mergedMap = new Map();
+          [...oldArr, ...arr.slice(-60)].forEach((item, i) => {
+            if (item && isWithinOneHour(item.ts, nowMs)) {
+              mergedMap.set(item.id || `${item.ts}_${i}`, item);
+            }
+          });
+          const merged = Array.from(mergedMap.values())
+            .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+            .slice(-80);
+
           return {
             ...prev,
-            [peer.id]: arr.slice(-60),
+            [peer.id]: merged,
           };
         });
       });
@@ -1493,10 +1639,21 @@ export default function App() {
       const arr = Object.values(val)
         .filter((m) => isWithinOneHour(m?.ts, nowMs))
         .sort((a, b) => (a.ts || 0) - (b.ts || 0));
-      setDmMessagesByPeer((prev) => ({
-        ...prev,
-        [dmTarget.id]: arr.slice(-60),
-      }));
+      setDmMessagesByPeer((prev) => {
+        const localList = prev[dmTarget.id] || [];
+        const mergedMap = new Map();
+        [...localList, ...arr.slice(-60)].forEach((item, i) => {
+          if (item && isWithinOneHour(item.ts, nowMs)) {
+            mergedMap.set(item.id || `${item.ts}_${i}`, item);
+          }
+        });
+        return {
+          ...prev,
+          [dmTarget.id]: Array.from(mergedMap.values())
+            .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+            .slice(-80),
+        };
+      });
     });
     return () => unsub();
   }, [enteredLobby, dmTarget, myId]);
@@ -2457,7 +2614,7 @@ export default function App() {
       },
     ]);
     setMatchUnread(0);
-    setMatchDrawerOpen(false);
+    setMatchDrawerOpen(true);
     setFloatingReaction(null);
 
     setActiveMatch({
@@ -2501,7 +2658,7 @@ export default function App() {
     roomIdForSync = null,
     isHostForSync = true,
     opponentObj = null,
-    openChatByDefault = false
+    openChatByDefault = true
   ) {
     clearAllGameTimers();
     processedLiveRoundRef.current = 0;
@@ -2636,7 +2793,7 @@ export default function App() {
     isBot = false,
     customRoomId = null,
     isHost = true,
-    openChatByDefault = false
+    openChatByDefault = true
   ) {
     const resolvedIsBot = Boolean(isBot || opponent?.isBot || LOBBY_BOT_ID_SET.has(opponent?.id));
     const roomId = customRoomId || `room_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -2714,14 +2871,35 @@ export default function App() {
     }
   }
 
+  function handleRandomQuickMatch() {
+    const candidateGames = ["kelimelik", "battleship", "rps", "ttt", "wordle", "sudoku"];
+    const randomGameId = candidateGames[Math.floor(Math.random() * candidateGames.length)];
+    const availablePeers = activeLobbyPlayers.filter((u) => u.status !== "in_game");
+    const onlineHumans = availablePeers.filter((u) => !u.isBot);
+
+    if (onlineHumans.length > 0 && dbRef.current) {
+      const randomHuman = onlineHumans[Math.floor(Math.random() * onlineHumans.length)];
+      sendGameInvite(randomHuman, randomGameId);
+      return;
+    }
+
+    const pool = availablePeers.length > 0 ? availablePeers : LOBBY_BOT_PLAYERS;
+    const pickedOpp = pool[Math.floor(Math.random() * pool.length)];
+    startMatch(pickedOpp, randomGameId, true, null, true, true);
+  }
+
   function handleStartPracticeGame(gameId) {
+    if (gameId === "random_match") {
+      handleRandomQuickMatch();
+      return;
+    }
     if (gameId === "bluff") {
       openBluffTable(null);
       return;
     }
     const pickedBot =
       LOBBY_BOT_PLAYERS[Math.floor(Math.random() * LOBBY_BOT_PLAYERS.length)];
-    startMatch(pickedBot, gameId, true, null, true, false);
+    startMatch(pickedBot, gameId, true, null, true, true);
   }
 
   function sendGameInvite(targetUser, gameId) {
@@ -2731,7 +2909,7 @@ export default function App() {
     }
 
     if (targetUser.isBot || LOBBY_BOT_ID_SET.has(targetUser.id)) {
-      startMatch(targetUser, gameId, true, null, true, false);
+      startMatch(targetUser, gameId, true, null, true, true);
       return;
     }
 
@@ -2753,7 +2931,7 @@ export default function App() {
       setOutgoingInvite(invitePayload);
       setSelectedTargetUser(null);
     } else {
-      startMatch(targetUser, gameMeta.id, false, `local_${Date.now()}`, true, false);
+      startMatch(targetUser, gameMeta.id, false, `local_${Date.now()}`, true, true);
     }
   }
 
@@ -2801,12 +2979,11 @@ export default function App() {
     const roomId = `room_${Date.now()}`;
     const inviter = { id: incomingInvite.fromId, name: incomingInvite.fromName };
     const gameId = incomingInvite.gameId;
-    const shouldOpenChat = Boolean(incomingInvite.openChat);
     if (dbRef.current) {
       update(ref(dbRef.current, `invites/${myId}`), { status: "accepted", roomId });
     }
     setIncomingInvite(null);
-    startMatch(inviter, gameId, false, roomId, false, shouldOpenChat);
+    startMatch(inviter, gameId, false, roomId, false, true);
   }
 
   function declineIncomingInvite() {
@@ -2857,6 +3034,7 @@ export default function App() {
       setBluffState(createInitialBluffState(participants, 1, {}));
     }
     setResumableMatch(null);
+    setMatchDrawerOpen(true);
     setActiveMatch(restored);
   }
 
@@ -2879,7 +3057,7 @@ export default function App() {
         activeMatch.roomId,
         activeMatch.isHost,
         activeMatch.opponent,
-        matchDrawerOpen
+        true
       );
       return;
     }
@@ -3101,33 +3279,27 @@ export default function App() {
     if (!text) return;
     const peerSnapshot = dmTarget;
     const msg = {
-      id: "dm_" + Date.now(),
+      id: "dm_" + Date.now() + "_" + Math.random().toString(36).slice(2, 5),
       senderId: myId,
       senderName: nickname.trim(),
       text,
       ts: Date.now(),
     };
     setDmInput("");
+    appendDmMessage(peerSnapshot.id, msg);
 
     if (peerSnapshot.isBot || LOBBY_BOT_ID_SET.has(peerSnapshot.id)) {
-      setDmMessagesByPeer((prev) => ({
-        ...prev,
-        [peerSnapshot.id]: [...(prev[peerSnapshot.id] || []), msg],
-      }));
       const delayMs = computeHumanBotDelayMs(text);
       const replyText = getBotChatReply(text, "general", peerSnapshot.id, peerSnapshot.name);
       setTimeout(() => {
         const replyMsg = {
-          id: "dm_b_" + Date.now(),
+          id: "dm_b_" + Date.now() + "_" + Math.random().toString(36).slice(2, 5),
           senderId: peerSnapshot.id,
           senderName: peerSnapshot.name,
           text: replyText,
           ts: Date.now(),
         };
-        setDmMessagesByPeer((prev) => ({
-          ...prev,
-          [peerSnapshot.id]: [...(prev[peerSnapshot.id] || []), replyMsg],
-        }));
+        appendDmMessage(peerSnapshot.id, replyMsg);
       }, delayMs);
       return;
     }
@@ -3135,11 +3307,6 @@ export default function App() {
     if (dbRef.current) {
       const threadId = [myId, peerSnapshot.id].sort().join("__");
       push(ref(dbRef.current, `chats/dm/${threadId}`), msg);
-    } else {
-      setDmMessagesByPeer((prev) => ({
-        ...prev,
-        [peerSnapshot.id]: [...(prev[peerSnapshot.id] || []), msg],
-      }));
     }
   }
 
@@ -3868,7 +4035,7 @@ export default function App() {
                   activeMatch.roomId,
                   activeMatch.isHost,
                   activeMatch.opponent,
-                  matchDrawerOpen
+                  true
                 )
               }
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200"
@@ -4818,7 +4985,7 @@ export default function App() {
             >
               <span className="flex items-center gap-2">
                 <MessageCircle className="w-4 h-4 text-indigo-400" />
-                Maç Sohbeti ({activeMatch.opponent.name})
+                Sohbet ({activeMatch.opponent.name})
                 {matchUnread > 0 && (
                   <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px]">
                     {matchUnread}
@@ -4945,11 +5112,14 @@ export default function App() {
             setJoinedBluffTable(null);
             setDmTarget(null);
             setIncomingDm(null);
+            setDmMessagesByPeer({});
+            setDmUnreadByPeer({});
             if (typeof window !== "undefined") {
               window.localStorage.setItem("duello_entered_lobby", "0");
               window.localStorage.setItem("duello_fd_authed", "0");
               window.localStorage.removeItem("duello_active_match");
               window.localStorage.removeItem("duello_resumable_match");
+              window.localStorage.removeItem("duello_dm_messages");
             }
           }}
           className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300"
@@ -5115,16 +5285,28 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
-            {PRACTICE_GAMES_META.map((g) => (
-              <button
-                key={g.id}
-                onClick={() => handleStartPracticeGame(g.id)}
-                className="bg-slate-950/85 hover:bg-slate-800/90 border border-slate-800 hover:border-indigo-500/40 rounded-xl px-3.5 py-3 text-left transition active:scale-[0.98]"
-              >
-                <div className="font-bold text-sm text-white truncate">{g.name}</div>
-                <div className="text-xs text-slate-400 mt-0.5">{g.badge}</div>
-              </button>
-            ))}
+            {PRACTICE_GAMES_META.map((g) => {
+              const isRandom = g.id === "random_match";
+              return (
+                <button
+                  key={g.id}
+                  onClick={() => handleStartPracticeGame(g.id)}
+                  className={`rounded-xl px-3.5 py-3 text-left transition active:scale-[0.98] border ${
+                    isRandom
+                      ? "bg-indigo-600/20 hover:bg-indigo-600/30 border-indigo-500/50"
+                      : "bg-slate-950/85 hover:bg-slate-800/90 border-slate-800 hover:border-indigo-500/40"
+                  }`}
+                >
+                  <div className="font-bold text-sm text-white truncate flex items-center gap-1.5">
+                    {isRandom && <Shuffle className="w-3.5 h-3.5 text-indigo-300 shrink-0" />}
+                    <span>{g.name}</span>
+                  </div>
+                  <div className={`text-xs mt-0.5 ${isRandom ? "text-indigo-300" : "text-slate-400"}`}>
+                    {g.badge}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </section>
 
@@ -5222,20 +5404,19 @@ export default function App() {
           </div>
         </section>
 
-        {/* EN ÇOK KAZANANLAR (İLK 5) - YATAY KAYAR ŞERİT */}
         <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xs font-extrabold text-white">
               En Çok Kazananlar (İlk 5)
             </h2>
-            <span className="text-[11px] text-slate-400">Kaydır →</span>
+            <span className="text-[11px] text-slate-400">Otomatik Akış</span>
           </div>
 
-          <div className="flex gap-2 overflow-x-auto pb-0.5 snap-x snap-mandatory touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <AutoMarqueeRow speed={0.55}>
             {topFiveWinners.map((player, idx) => (
               <div
                 key={player.id}
-                className="min-w-[146px] snap-start shrink-0 bg-slate-950/85 border border-slate-800/90 rounded-xl px-3 py-2 flex flex-col justify-between gap-1.5"
+                className="min-w-[146px] shrink-0 bg-slate-950/85 border border-slate-800/90 rounded-xl px-3 py-2 flex flex-col justify-between gap-1.5"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span
@@ -5270,24 +5451,23 @@ export default function App() {
                 </div>
               </div>
             ))}
-          </div>
+          </AutoMarqueeRow>
         </section>
 
-        {/* SON ONLINE OLANLAR (İLK 5) - YATAY KAYAR ŞERİT */}
         <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xs font-extrabold text-white flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-sky-400" />
               Son Online Olanlar (İlk 5)
             </h2>
-            <span className="text-[11px] text-slate-400">Kaydır →</span>
+            <span className="text-[11px] text-slate-400">Otomatik Akış</span>
           </div>
 
-          <div className="flex gap-2 overflow-x-auto pb-0.5 snap-x snap-mandatory touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <AutoMarqueeRow speed={0.5}>
             {lastFiveOnlinePlayers.map((player, idx) => (
               <div
                 key={`recent_${player.id}`}
-                className="min-w-[140px] snap-start shrink-0 bg-slate-950/85 border border-slate-800/90 rounded-xl px-3 py-2"
+                className="min-w-[140px] shrink-0 bg-slate-950/85 border border-slate-800/90 rounded-xl px-3 py-2"
               >
                 <div className="text-xs font-semibold text-white truncate">
                   {idx + 1}. {player.name} {player.isMe ? "(Sen)" : ""}
@@ -5304,7 +5484,7 @@ export default function App() {
                 </div>
               </div>
             ))}
-          </div>
+          </AutoMarqueeRow>
         </section>
 
         {isFdAdmin && (
@@ -5424,8 +5604,7 @@ export default function App() {
                     >
                       <div className="min-w-0">
                         <span className="font-bold text-indigo-300 mr-1.5">
-                          {m.senderName}
-                          {m.senderName === "FD" ? " 🛡️" : ""}:
+                          {mine ? `${m.senderName} (Sen)` : m.senderName}:
                         </span>
                         <span className="break-words">{m.text}</span>
                       </div>
@@ -5443,20 +5622,19 @@ export default function App() {
                 })}
               </div>
 
-              <form onSubmit={handleSendGlobalMessage} className="flex gap-2">
+              <form onSubmit={handleSendGlobalMessage} className="flex items-center gap-2">
                 <input
                   type="text"
                   value={globalInput}
                   onChange={(e) => setGlobalInput(e.target.value)}
                   placeholder="Lobiye mesaj yaz..."
-                  className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
                 <button
                   type="submit"
-                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1"
+                  className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
                 >
-                  <Send className="w-3.5 h-3.5" />
-                  Gönder
+                  <Send className="w-4 h-4" />
                 </button>
               </form>
             </div>
@@ -5465,106 +5643,99 @@ export default function App() {
       </main>
 
       {bluffLobbyOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl max-h-[88vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-base font-extrabold text-white">Blöf Masası Kur</h3>
                 <p className="text-xs text-slate-400">
-                  En az 3 kişiyle oynanır. Eksik kalan yerler botlarla tamamlanır.
+                  Katılan oyuncular: 1 (Sen) + {bluffJoinedMembers.length} kişi (Eksik kalanlar botlarla tamamlanır)
                 </p>
               </div>
               <button
                 onClick={closeBluffTable}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 space-y-2">
-              <div className="text-[11px] font-bold text-indigo-300">
-                Masadaki Oyuncular ({1 + bluffJoinedMembers.length}/4)
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                <span className="px-2.5 py-1 rounded-full bg-indigo-600/30 border border-indigo-400/50 text-xs font-bold text-white">
-                  {nickname.trim()} (Sen)
+            <div className="flex flex-wrap gap-1.5">
+              <span className="px-2.5 py-1 rounded-full bg-indigo-600/30 border border-indigo-400/50 text-xs font-bold text-indigo-200">
+                {nickname.trim()} (Sen)
+              </span>
+              {bluffJoinedMembers.map((m) => (
+                <span
+                  key={m.id}
+                  className="px-2.5 py-1 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-xs font-bold text-emerald-300"
+                >
+                  {m.name} (Katıldı)
                 </span>
-                {bluffJoinedMembers.map((m) => (
-                  <span
-                    key={m.id}
-                    className="px-2.5 py-1 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-xs font-semibold text-emerald-200"
-                  >
-                    {m.name}
-                  </span>
-                ))}
-              </div>
+              ))}
             </div>
 
             <div className="space-y-2">
-              <div className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                Aktif Oyuncuları Masaya Davet Et
-              </div>
-              <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                {activeLobbyPlayers.map((u) => {
-                  const invState = bluffInvitedIds[u.id];
-                  const busy = u.status === "in_game";
-                  return (
-                    <div
-                      key={u.id}
-                      className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs"
-                    >
-                      <span className="font-semibold text-white">{u.name}</span>
-                      <button
-                        disabled={busy || invState === "pending" || invState === "accepted"}
-                        onClick={() => sendBluffInviteToUser(u)}
-                        className={`px-2.5 py-1 rounded-lg font-bold text-[11px] ${
-                          invState === "accepted"
-                            ? "bg-emerald-600/30 text-emerald-300 border border-emerald-500/40"
-                            : invState === "pending"
-                            ? "bg-amber-600/20 text-amber-300 border border-amber-500/30"
-                            : busy
-                            ? "bg-slate-800 text-slate-500"
-                            : "bg-indigo-600 hover:bg-indigo-500 text-white"
-                        }`}
-                      >
-                        {invState === "accepted"
-                          ? "Katıldı"
-                          : invState === "pending"
-                          ? "Bekleniyor..."
-                          : busy
-                          ? "Oyunda"
-                          : "Davet Et"}
-                      </button>
+              <div className="text-xs font-bold text-slate-300">Masanın Oyuncularına Davet Gönder</div>
+              {activeLobbyPlayers.map((u) => {
+                const invStatus = bluffInvitedIds[u.id];
+                const isJoined = bluffJoinedMembers.some((m) => m.id === u.id);
+                return (
+                  <div
+                    key={u.id}
+                    className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl px-3 py-2"
+                  >
+                    <div className="text-xs font-semibold text-white">
+                      {u.name}{" "}
+                      <span className="text-[11px] text-slate-400">
+                        ({u.status === "in_game" ? "Oyunda" : u.isBot ? "Bot" : "Çevrim içi"})
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
+                    {isJoined || invStatus === "accepted" ? (
+                      <span className="text-[11px] font-bold text-emerald-400">Masada</span>
+                    ) : invStatus === "pending" ? (
+                      <span className="text-[11px] font-bold text-amber-300">Davet Gönderildi</span>
+                    ) : invStatus === "declined" ? (
+                      <button
+                        onClick={() => sendBluffInviteToUser(u)}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-600 text-[11px] font-bold text-slate-200 hover:text-white"
+                      >
+                        Tekrar Davet Et
+                      </button>
+                    ) : (
+                      <button
+                        disabled={u.status === "in_game"}
+                        onClick={() => sendBluffInviteToUser(u)}
+                        className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-[11px] font-bold text-white"
+                      >
+                        Davet Et
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             <button
               onClick={handleStartBluffFromTable}
-              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-extrabold text-xs text-white shadow-lg"
+              className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 font-extrabold text-sm text-white shadow-lg"
             >
-              Blöf Oyununu Başlat
+              Oyunu Başlat ({buildBluffParticipantsFromTable(bluffJoinedMembers).length} Oyuncu)
             </button>
           </div>
         </div>
       )}
 
       {selectedTargetUser && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-extrabold text-white">
-                  {selectedTargetUser.name} ile Oyna
-                </h3>
+                <h3 className="text-base font-bold text-white">{selectedTargetUser.name}</h3>
                 <p className="text-xs text-slate-400">Oyun seç ve davet gönder</p>
               </div>
               <button
                 onClick={() => setSelectedTargetUser(null)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -5577,14 +5748,14 @@ export default function App() {
                   <button
                     key={g.id}
                     onClick={() => setSelectedGameForInvite(g.id)}
-                    className={`p-2.5 rounded-xl border text-left transition ${
+                    className={`p-3 rounded-xl border text-left transition ${
                       active
                         ? "bg-indigo-600/25 border-indigo-400 text-white"
                         : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
                     }`}
                   >
                     <div className="text-xs font-bold">{g.name}</div>
-                    <div className="text-[10px] text-slate-400">{g.badge}</div>
+                    <div className="text-[11px] text-slate-400">{g.badge}</div>
                   </button>
                 );
               })}
@@ -5592,9 +5763,9 @@ export default function App() {
 
             <button
               onClick={() => sendGameInvite(selectedTargetUser, selectedGameForInvite)}
-              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-xs text-white"
+              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold text-sm text-white"
             >
-              {selectedGameForInvite === "bluff" ? "Blöf Masası Aç ve Davet Et" : "Davet Gönder"}
+              {selectedGameForInvite === "bluff" ? "Blöf Masası Kur" : "Davet Gönder"}
             </button>
           </div>
         </div>
@@ -5604,42 +5775,43 @@ export default function App() {
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
           <form
             onSubmit={handleSubmitReport}
-            className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl"
+            className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl"
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-white">
-                {reportTargetUser.name} Kişisini Şikayet Et
+              <h3 className="text-base font-bold text-white">
+                {reportTargetUser.name} Kullanıcısını Şikayet Et
               </h3>
               <button
                 type="button"
                 onClick={() => setReportTargetUser(null)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <textarea
-              rows={3}
+            <input
+              type="text"
+              maxLength={140}
               value={reportReason}
               onChange={(e) => setReportReason(e.target.value)}
-              placeholder="Şikayet nedenini kısaca yazın..."
-              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              placeholder="Şikayet sebebini yazın (örn: hakaret, spam)..."
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
             />
 
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setReportTargetUser(null)}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200"
+                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200"
               >
                 İptal
               </button>
               <button
                 type="submit"
-                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-xs font-bold text-white"
+                className="py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-extrabold text-slate-950"
               >
-                Şikayeti Gönder
+                Yönetime Gönder
               </button>
             </div>
           </form>
@@ -5647,26 +5819,26 @@ export default function App() {
       )}
 
       {dmTarget && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl max-w-md w-full p-4 space-y-3 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-4 space-y-3 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
               <div>
-                <h3 className="text-sm font-extrabold text-white">{dmTarget.name}</h3>
+                <h3 className="text-sm font-bold text-white">{dmTarget.name}</h3>
                 <p className="text-[11px] text-slate-400">Özel Mesaj (1 saat sonra silinir)</p>
               </div>
               <button
                 onClick={() => setDmTarget(null)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="max-h-64 min-h-[160px] overflow-y-auto space-y-2 pr-1">
+            <div className="h-56 overflow-y-auto space-y-2 pr-1">
               {activeDmList.length === 0 ? (
-                <p className="text-xs text-slate-500 text-center py-8">
+                <div className="text-xs text-slate-500 text-center py-10">
                   Henüz mesaj yok. İlk mesajı sen gönder!
-                </p>
+                </div>
               ) : (
                 activeDmList.map((m) => {
                   const mine = m.senderId === myId;
@@ -5676,7 +5848,7 @@ export default function App() {
                       className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
                     >
                       <div
-                        className={`px-3 py-2 rounded-2xl text-xs max-w-[80%] ${
+                        className={`px-3 py-2 rounded-2xl text-xs max-w-[82%] ${
                           mine
                             ? "bg-indigo-600 text-white rounded-br-sm"
                             : "bg-slate-800 text-slate-100 rounded-bl-sm"
@@ -5690,20 +5862,19 @@ export default function App() {
               )}
             </div>
 
-            <form onSubmit={handleSendDirectMessage} className="flex gap-2 pt-1">
+            <form onSubmit={handleSendDirectMessage} className="flex items-center gap-2">
               <input
                 type="text"
                 value={dmInput}
                 onChange={(e) => setDmInput(e.target.value)}
                 placeholder={`${dmTarget.name} kişisine yaz...`}
-                className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
               />
               <button
                 type="submit"
-                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1"
+                className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
               >
-                <Send className="w-3.5 h-3.5" />
-                Gönder
+                <Send className="w-4 h-4" />
               </button>
             </form>
           </div>
