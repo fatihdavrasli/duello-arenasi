@@ -1852,6 +1852,8 @@ export default function App() {
             const newEntry = {
               round: roundNum,
               resultForP1: winSide === "p1" ? "win" : winSide === "p2" ? "lose" : "draw",
+              p1Pick: gs.p1Pick,
+              p2Pick: gs.p2Pick,
             };
             const nextHistory = [
               ...(Array.isArray(gs.history) ? gs.history.filter((h) => h.round !== roundNum) : []),
@@ -3335,6 +3337,8 @@ export default function App() {
       {
         round: currentRoundNum,
         resultForP1: roundOutcome,
+        p1Pick: choice,
+        p2Pick: oppChoice,
       },
     ].sort((a, b) => a.round - b.round);
     setRpsHistory(nextHistory);
@@ -4445,16 +4449,20 @@ export default function App() {
 
                   let boxCls = "bg-slate-950 border-slate-800 text-slate-500";
                   let mark = "-";
+                  let myRoundPick = null;
+                  let oppRoundPick = null;
 
                   if (hist) {
-                    const iWonRound =
-                      activeMatch.isBot || activeMatch.isHost
-                        ? hist.resultForP1 === "win"
-                        : hist.resultForP1 === "lose";
-                    const iLostRound =
-                      activeMatch.isBot || activeMatch.isHost
-                        ? hist.resultForP1 === "lose"
-                        : hist.resultForP1 === "win";
+                    const useP1Perspective = activeMatch.isBot || activeMatch.isHost;
+                    const iWonRound = useP1Perspective
+                      ? hist.resultForP1 === "win"
+                      : hist.resultForP1 === "lose";
+                    const iLostRound = useP1Perspective
+                      ? hist.resultForP1 === "lose"
+                      : hist.resultForP1 === "win";
+
+                    myRoundPick = useP1Perspective ? hist.p1Pick : hist.p2Pick;
+                    oppRoundPick = useP1Perspective ? hist.p2Pick : hist.p1Pick;
 
                     if (iWonRound) {
                       boxCls = "bg-emerald-950/70 border-emerald-500/50 text-emerald-300";
@@ -4469,15 +4477,23 @@ export default function App() {
                   } else if (isCurrent) {
                     boxCls = "bg-indigo-950/60 border-indigo-400 text-indigo-200";
                     mark = "•";
+                    myRoundPick = rpsMyPick;
+                    oppRoundPick =
+                      rpsPhase === "revealing" || rpsPhase === "finished" ? rpsOppPick : null;
                   }
 
                   return (
                     <div
                       key={roundNum}
-                      className={`rounded-xl border py-1.5 px-1 text-[11px] font-bold ${boxCls}`}
+                      className={`rounded-xl border py-1.5 px-1 text-[11px] font-bold flex flex-col items-center justify-between min-h-[58px] ${boxCls}`}
                     >
                       <div>T{roundNum}</div>
-                      <div className="text-xs mt-0.5">{mark}</div>
+                      <div className="text-xs leading-tight">{mark}</div>
+                      <div className="flex items-center justify-center gap-0.5 text-[11px] leading-none mt-0.5">
+                        <span>{myRoundPick ? getRPSEmoji(myRoundPick) : "·"}</span>
+                        <span className="opacity-40">/</span>
+                        <span>{oppRoundPick ? getRPSEmoji(oppRoundPick) : "·"}</span>
+                      </div>
                     </div>
                   );
                 })}
@@ -4488,7 +4504,9 @@ export default function App() {
               <div className="grid grid-cols-2 gap-3 bg-slate-950/80 border border-slate-800 rounded-2xl p-3">
                 <div className="space-y-1">
                   <div className="text-[11px] text-slate-400">Senin Seçimin</div>
-                  <div className="text-3xl">{getRPSEmoji(rpsMyPick)}</div>
+                  <div className="text-3xl">
+                    {rpsMyPick ? getRPSEmoji(rpsMyPick) : "?"}
+                  </div>
                   <div className="text-xs font-bold text-slate-200">{getRPSLabel(rpsMyPick)}</div>
                 </div>
                 <div className="space-y-1 border-l border-slate-800">
@@ -4498,7 +4516,7 @@ export default function App() {
                       ? getRPSEmoji(rpsOppPick)
                       : rpsOppPick
                       ? "✅"
-                      : "❔"}
+                      : "?"}
                   </div>
                   <div className="text-xs font-bold text-slate-200">
                     {rpsPhase === "revealing" || rpsPhase === "finished"
@@ -5589,12 +5607,9 @@ export default function App() {
             className="bg-slate-900 border border-slate-700 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl"
           >
             <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-extrabold text-white">
-                  {reportTargetUser.name} Kullanıcısını Şikayet Et
-                </h3>
-                <p className="text-xs text-slate-400">Şikayet kaydı FD yönetimine iletilir.</p>
-              </div>
+              <h3 className="text-base font-extrabold text-white">
+                {reportTargetUser.name} Kişisini Şikayet Et
+              </h3>
               <button
                 type="button"
                 onClick={() => setReportTargetUser(null)}
@@ -5606,26 +5621,25 @@ export default function App() {
 
             <textarea
               rows={3}
-              maxLength={200}
               value={reportReason}
               onChange={(e) => setReportReason(e.target.value)}
-              placeholder="Şikayet sebebini kısaca yazın..."
+              placeholder="Şikayet nedenini kısaca yazın..."
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
             />
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => setReportTargetUser(null)}
-                className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300"
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200"
               >
                 İptal
               </button>
               <button
                 type="submit"
-                className="py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-xs font-bold text-white"
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-xs font-bold text-white"
               >
-                Şikayet Gönder
+                Şikayeti Gönder
               </button>
             </div>
           </form>
@@ -5640,34 +5654,19 @@ export default function App() {
                 <h3 className="text-sm font-extrabold text-white">{dmTarget.name}</h3>
                 <p className="text-[11px] text-slate-400">Özel Mesaj (1 saat sonra silinir)</p>
               </div>
-              <div className="flex items-center gap-1.5">
-                {dmTarget.status !== "in_game" && (
-                  <button
-                    onClick={() => {
-                      const peer = dmTarget;
-                      setDmTarget(null);
-                      setSelectedGameForInvite("kelimelik");
-                      setSelectedTargetUser(peer);
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-indigo-600/25 border border-indigo-500/40 text-[11px] font-bold text-indigo-300"
-                  >
-                    Oyuna Davet
-                  </button>
-                )}
-                <button
-                  onClick={() => setDmTarget(null)}
-                  className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+              <button
+                onClick={() => setDmTarget(null)}
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            <div className="h-60 overflow-y-auto space-y-2 pr-1">
+            <div className="max-h-64 min-h-[160px] overflow-y-auto space-y-2 pr-1">
               {activeDmList.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-xs text-slate-500">
-                  Henüz özel mesaj yok. İlk mesajı sen gönder!
-                </div>
+                <p className="text-xs text-slate-500 text-center py-8">
+                  Henüz mesaj yok. İlk mesajı sen gönder!
+                </p>
               ) : (
                 activeDmList.map((m) => {
                   const mine = m.senderId === myId;
@@ -5677,7 +5676,7 @@ export default function App() {
                       className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
                     >
                       <div
-                        className={`px-3 py-2 rounded-2xl text-xs max-w-[82%] ${
+                        className={`px-3 py-2 rounded-2xl text-xs max-w-[80%] ${
                           mine
                             ? "bg-indigo-600 text-white rounded-br-sm"
                             : "bg-slate-800 text-slate-100 rounded-bl-sm"
@@ -5696,14 +5695,15 @@ export default function App() {
                 type="text"
                 value={dmInput}
                 onChange={(e) => setDmInput(e.target.value)}
-                placeholder={`${dmTarget.name} kişisine mesaj yaz...`}
+                placeholder={`${dmTarget.name} kişisine yaz...`}
                 className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
               />
               <button
                 type="submit"
-                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white"
+                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white flex items-center gap-1"
               >
-                <Send className="w-4 h-4" />
+                <Send className="w-3.5 h-3.5" />
+                Gönder
               </button>
             </form>
           </div>
